@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CoreBluetooth
 
 // MARK: - Device Row View
 struct DeviceRowView: View {
