@@ -6,178 +6,90 @@
 //
 
 import SwiftUI
-import CoreBluetooth
 
-
-// MARK: - Main App View
 struct ContentView: View {
-    @StateObject private var bleManager = BLEManager()
-    @State private var showingDebugLog = false
+    @State private var selectedTab = 0
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 20) {
-                // Connection Status
-                statusCard
-                
-                // Received Data
-                if bleManager.isConnected {
-                    dataCard
-                }
-                
-                // Device List
-                deviceListCard
-                
-                // Controls
-                controlButtons
-                
-                Spacer()
-            }
-            .padding()
-            .navigationTitle("Arduino BLE")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Debug") {
-                        showingDebugLog = true
+        TabView(selection: $selectedTab) {
+            HomeView(selectedTab: $selectedTab)
+                .tabItem {
+                    VStack {
+                        Spacer().frame(height: 20)
+                        Image(systemName: "house")
+                            .renderingMode(.template)
+                            .foregroundColor(selectedTab == 0 ? Color.white : Color.white.opacity(1))
+                        Text("Home")
+                            .foregroundColor(selectedTab == 0 ? Color.white : Color.white.opacity(1))
                     }
                 }
-            }
-            .sheet(isPresented: $showingDebugLog) {
-                DebugLogView(debugLog: bleManager.debugLog)
-            }
-        }
-    }
-    
-    private var statusCard: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Circle()
-                    .fill(bleManager.isConnected ? Color.green : Color.red)
-                    .frame(width: 12, height: 12)
-                
-                Text(bleManager.connectionStatus)
-                    .font(.headline)
-                
-                Spacer()
-                
-                if bleManager.isConnected && bleManager.rssi != 0 {
-                    Text("RSSI: \(bleManager.rssi) dBm")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            if bleManager.isConnected {
-                Text("Connected to Arduino")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(10)
-    }
-    
-    private var dataCard: some View {
-        VStack(spacing: 10) {
-            Text("Received Number")
-                .font(.headline)
-            
-            Text("\(bleManager.receivedNumber)")
-                .font(.system(size: 48, weight: .bold, design: .monospaced))
-                .foregroundColor(.blue)
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(10)
-    }
-    
-    private var deviceListCard: some View {
-        VStack(alignment: .leading) {
-            deviceListHeader
-            deviceListContent
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(10)
-    }
-    
-    private var deviceListHeader: some View {
-        Text("Discovered Devices")
-            .font(.headline)
-    }
-    
-    private var deviceListContent: some View {
-        Group {
-            if bleManager.discoveredPeripherals.isEmpty {
-                emptyDeviceListView
-            } else {
-                deviceList
-            }
-        }
-    }
-    
-    private var emptyDeviceListView: some View {
-        Text("No devices found")
-            .foregroundColor(.secondary)
-            .italic()
-    }
-    
-    private var deviceList: some View {
-            ForEach(bleManager.discoveredPeripherals, id: \.identifier) { peripheral in
-                DeviceRowView(
-                    peripheral: peripheral,
-                    isConnected: bleManager.isConnected,
-                    connectedPeripheralID: bleManager.connectedPeripheralID,
-                    onConnect: {
-                        bleManager.connect(to: peripheral)
+                .tag(0)
+            CompassView()
+                .tabItem {
+                    VStack {
+                        Spacer().frame(height: 20)
+                        Image(systemName: "location")
+                            .renderingMode(.template)
+                            .foregroundColor(selectedTab == 1 ? Color.white : Color.white.opacity(1))
+                        Text("Compass")
+                            .foregroundColor(selectedTab == 1 ? Color.white : Color.white.opacity(1))
                     }
-                )
-            }
+                }
+                .tag(1)
+            FriendsView(selectedTab: $selectedTab)
+                .tabItem {
+                    VStack {
+                        Spacer().frame(height: 20)
+                        Image(systemName: "person.3")
+                            .renderingMode(.template)
+                            .foregroundColor(selectedTab == 2 ? Color.white : Color.white.opacity(1))
+                        Text("Friends")
+                            .foregroundColor(selectedTab == 2 ? Color.white : Color.white.opacity(1))
+                    }
+                }
+                .tag(2)
+            DiscoverView()
+                .tabItem {
+                    VStack {
+                        Spacer().frame(height: 20)
+                        Image(systemName: "magnifyingglass")
+                            .renderingMode(.template)
+                            .foregroundColor(selectedTab == 3 ? Color.white : Color.white.opacity(1))
+                        Text("Discover")
+                            .foregroundColor(selectedTab == 3 ? Color.white : Color.white.opacity(1))
+                    }
+                }
+                .tag(3)
+            SettingsView()
+                .tabItem {
+                    VStack {
+                        Spacer().frame(height: 20)
+                        Image(systemName: "gearshape")
+                            .renderingMode(.template)
+                            .foregroundColor(selectedTab == 4 ? Color.white : Color.white.opacity(1))
+                        Text("Settings")
+                            .foregroundColor(selectedTab == 4 ? Color.white : Color.white.opacity(1))
+                    }
+                }
+                .tag(4)
         }
-    private var controlButtons: some View {
-        HStack(spacing: 20) {
-            scanButton
-            
-            if bleManager.isConnected {
-                disconnectButton
+        .accentColor(.white)
+        .background(Color.black.ignoresSafeArea())
+        .onAppear {
+            let tabBarAppearance = UITabBarAppearance()
+            tabBarAppearance.configureWithOpaqueBackground()
+            tabBarAppearance.backgroundColor = UIColor.black
+            UITabBar.appearance().standardAppearance = tabBarAppearance
+            if #available(iOS 15.0, *) {
+                UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
             }
         }
     }
-    
-    private var scanButton: some View {
-        Button(action: {
-            if bleManager.isScanning {
-                bleManager.stopScanning()
-            } else {
-                bleManager.startScanning()
-            }
-        }) {
-            HStack {
-                Image(systemName: bleManager.isScanning ? "stop.circle" : "magnifyingglass")
-                Text(bleManager.isScanning ? "Stop Scan" : "Scan")
-            }
-            .padding()
-            .background(bleManager.isScanning ? Color.red : Color.blue)
-            .foregroundColor(.white)
-            .cornerRadius(10)
-        }
-    }
-    
-    private var disconnectButton: some View {
-        Button(action: {
-            bleManager.disconnect()
-        }) {
-            HStack {
-                Image(systemName: "xmark.circle")
-                Text("Disconnect")
-            }
-            .padding()
-            .background(Color.red)
-            .foregroundColor(.white)
-            .cornerRadius(10)
-        }
+}
+
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
     }
 }
 
