@@ -2,7 +2,7 @@ import SwiftUI
 import CoreBluetooth
 
 struct FriendsView: View {
-    @StateObject private var bleManager = BLEManager()
+    @EnvironmentObject var bleManager: BLEManager
     @State private var hasPairedProxi = false // Simulate if user has paired their own Proxi
     @Binding var selectedTab: Int
     @State private var selectedFriendsTab: Int = 0 // 0: Paired, 1: In Range, 2: Nearby, 3: Requests
@@ -20,12 +20,14 @@ struct FriendsView: View {
         FriendProfile(id: "6", name: "Jordan Kim", status: "Requesting", lastActive: Date(), isOnline: true, avatar: "JK")
     ]
     @State private var sentRequests: Set<String> = []
+    
+    @Binding var isSidebarOpen: Bool
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
-                TopBarView(selectedTab: $selectedTab)
+                TopBarView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
                 if !hasPairedProxi {
                     unpairedStateView
                 } else {
@@ -667,7 +669,7 @@ struct ProxiDevice: Identifiable {
 
 struct FriendsView_Previews: PreviewProvider {
     static var previews: some View {
-        FriendsView(selectedTab: Binding.constant(2))
+        FriendsView(selectedTab: Binding.constant(2), isSidebarOpen: Binding.constant(false))
     }
 }
 

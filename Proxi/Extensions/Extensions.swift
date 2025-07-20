@@ -1,4 +1,14 @@
+//
+//  Extensions.swift
+//  Proxi
+//
+//  Created by Gabriel Wang on 7/20/25.
+//
+
+import Foundation
 import SwiftUI
+
+//MARK: Color + HEX
 
 extension Color {
     init(hex: String) {
@@ -24,4 +34,13 @@ extension Color {
             opacity: Double(a) / 255
         )
     }
-} 
+}
+
+
+extension DateFormatter {
+    static let timestamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+}

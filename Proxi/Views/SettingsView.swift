@@ -3,7 +3,7 @@ import CoreBluetooth
 
 struct SettingsView: View {
     @Binding var selectedTab: Int
-    @StateObject private var bleManager = BLEManager()
+    @EnvironmentObject var bleManager: BLEManager
     @State private var showingDebugLog = false
     @State private var showingProfile = false
     @State private var showingNotifications = false
@@ -13,12 +13,13 @@ struct SettingsView: View {
     @State private var editingDisplayName: Bool = false
     @State private var tempDisplayName: String = ""
     @FocusState private var isEditingName: Bool
+    @Binding var isSidebarOpen: Bool
     
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
-                TopBarView(selectedTab: $selectedTab)
+                TopBarView(selectedTab: $selectedTab, isSidebarOpen:$isSidebarOpen)
                 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -172,9 +173,10 @@ struct SettingsView: View {
                 connectionStatusCard
                 
                 // Data Display Card
-                if bleManager.isConnected {
-                    dataDisplayCard
-                }
+                //Todo: Only enable in dev setting
+//                if bleManager.isConnected {
+//                    dataDisplayCard
+//                }
                 
                 // Device List Card
                 deviceListCard
@@ -621,6 +623,6 @@ struct AboutView: View {
 
 struct SettingsView_Previews: PreviewProvider {
     static var previews: some View {
-        SettingsView(selectedTab: Binding.constant(4))
+        SettingsView(selectedTab: Binding.constant(4), isSidebarOpen: Binding.constant(false))
     }
 } 

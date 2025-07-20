@@ -1,11 +1,18 @@
 import SwiftUI
 
+
 struct CompassView: View {
     @Binding var selectedTab: Int
-    @State private var hasPairedProxi: Bool = false // Simulate if user has paired their own Proxi
+    @EnvironmentObject var bleManager: BLEManager // Use the same BLEManager instance
     @State private var hasFriends: Bool = false // Simulate if user has paired friends
     @State private var deviceHeading: Double = 0 // Device orientation
     @State private var selectedFriend: Friend? = nil
+    @Binding var isSidebarOpen: Bool
+    
+    // Computed property that uses BLE connection status
+    private var hasPairedProxi: Bool {
+        bleManager.isConnected
+    }
     
     // Mock data for demonstration
     let mockFriends = [
@@ -18,7 +25,7 @@ struct CompassView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: -100) {
-                TopBarView(selectedTab: $selectedTab)
+                TopBarView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
                 
                 if !hasPairedProxi {
                     VStack(spacing: 32) {
@@ -53,6 +60,19 @@ struct CompassView: View {
                                 .foregroundColor(.white.opacity(0.7))
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 32)
+                            
+                            // Show connection status if scanning or attempting to connect
+                            if bleManager.isScanning {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.8)
+                                    Text("Scanning for devices...")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                                .padding(.top, 8)
+                            }
                         }
                         Button(action: { selectedTab = 4 }) {
                             HStack(spacing: 12) {
@@ -79,28 +99,55 @@ struct CompassView: View {
                     }
                     .padding()
                 } else if !hasFriends {
-                    EmptyCompassView()
-                    Button(action: { selectedTab = 2 }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "person.3.fill")
-                                .font(.system(size: 20))
-                            Text("Add Friends")
+                    VStack(spacing: 32) {
+                        // Show successful connection message
+                        VStack(spacing: 16) {
+                            Spacer()
+                                .frame(height: 30)
+                            ZStack {
+                                Circle()
+                                    .fill(Color.green.opacity(0.2))
+                                    .frame(width: 80, height: 80)
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.green)
+                            }
+                            Text("Proxi Connected!")
                                 .font(.headline)
-                                .fontWeight(.semibold)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                            Text("Your Proxi device is now connected and ready to discover friends.")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 32)
                         }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color.blue, Color.purple]),
-                                startPoint: .leading,
-                                endPoint: .trailing
+                        .padding(.top, 60)
+                        
+                        EmptyCompassView()
+                        
+                        Button(action: { selectedTab = 2 }) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "person.3.fill")
+                                    .font(.system(size: 20))
+                                Text("Add Friends")
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [Color.blue, Color.purple]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
                             )
-                        )
-                        .cornerRadius(16)
-                        .padding(.horizontal, 32)
-                        .padding(.bottom, 200)
+                            .cornerRadius(16)
+                            .padding(.horizontal, 32)
+                            .padding(.bottom, 100)
+                        }
                     }
                 } else {
                     CompassInterfaceView(
@@ -114,8 +161,24 @@ struct CompassView: View {
             }
         }
         .onAppear {
-            // Simulate device heading updates
+            // Start heading updates and begin scanning if not connected
             startHeadingUpdates()
+            if !bleManager.isConnected && !bleManager.isScanning {
+                // Optionally start scanning automatically when view appears
+                // bleManager.startScanning()
+            }
+        }
+        .onChange(of: bleManager.isConnected) { isConnected in
+            if isConnected {
+                // Device just connected - you could add haptic feedback here
+                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                impactFeedback.impactOccurred()
+                
+                // Stop scanning when connected
+                if bleManager.isScanning {
+                    bleManager.stopScanning()
+                }
+            }
         }
     }
     
@@ -126,11 +189,9 @@ struct CompassView: View {
         }
     }
 }
-
 struct EmptyCompassView: View {
     var body: some View {
         VStack(spacing: 32) {
-            Spacer()
             
             // Large compass icon
             ZStack {
@@ -144,9 +205,6 @@ struct EmptyCompassView: View {
                         lineWidth: 2
                     )
                     .frame(width: 200, height: 200)
-                
-                // Cardinal directions
-                
                 
                 // Center icon
                 Image(systemName: "location.north.circle")
@@ -174,10 +232,8 @@ struct EmptyCompassView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
-            
-            Spacer()
         }
-        .padding(.top, 80)
+        .padding(.top, 20)
     }
 }
 
@@ -428,6 +484,6 @@ struct Friend: Identifiable {
 
 struct CompassView_Previews: PreviewProvider {
     static var previews: some View {
-        CompassView(selectedTab: Binding.constant(1))
+        CompassView(selectedTab: Binding.constant(1), isSidebarOpen: Binding.constant(false))
     }
-} 
+}

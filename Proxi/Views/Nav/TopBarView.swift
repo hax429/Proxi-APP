@@ -2,23 +2,39 @@ import SwiftUI
 
 struct TopBarView: View {
     @Binding var selectedTab: Int
+    @Binding var isSidebarOpen: Bool
+    
     var body: some View {
         HStack {
             // Hamburger menu
-            Image(systemName: "line.horizontal.3")
-                .resizable()
-                .frame(width: 28, height: 20)
-                .foregroundColor(.white)
-                .padding(.leading, 24)
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    isSidebarOpen.toggle()
+                }
+            }) {
+                Image(systemName: "line.horizontal.3")
+                    .resizable()
+                    .frame(width: 28, height: 20)
+                    .foregroundColor(.white)
+                    .padding(.leading, 24)
+            }
+            .buttonStyle(PlainButtonStyle())
+            
             Spacer()
+            
             // Logo
             Image("Logo text")
                 .resizable()
                 .scaledToFit()
                 .frame(height: 40)
+            
             Spacer()
+            
             // Profile image
-            Button(action: { selectedTab = 4 }) {
+            Button(action: {
+                selectedTab = 4
+                isSidebarOpen = false // Close sidebar when navigating
+            }) {
                 Image("Profile placeholder") // Replace with actual asset if available
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -35,6 +51,6 @@ struct TopBarView: View {
 
 struct TopBarView_Previews: PreviewProvider {
     static var previews: some View {
-        TopBarView(selectedTab: .constant(0))
+        TopBarView(selectedTab: .constant(0), isSidebarOpen: .constant(false))
     }
 } 

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct HomeView: View {
+    @EnvironmentObject var bleManager: BLEManager
     @Binding var selectedTab: Int
     @State private var isPaired: Bool = false // Simulate pairing status
     // Example data for demo purposes
@@ -14,11 +15,13 @@ struct HomeView: View {
         "Go to Settings to connect your Proxi.",
         "Use Discover to find new friends nearby."
     ]
+    
+    @Binding var isSidebarOpen: Bool
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
-                TopBarView(selectedTab: $selectedTab)
+                TopBarView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
                 ScrollView {
                     VStack(spacing: 28) {
                         // Gradient Welcome Header with Logo
@@ -303,6 +306,6 @@ struct FeatureCard: View {
 
 struct HomeView_Previews: PreviewProvider {
     static var previews: some View {
-        HomeView(selectedTab: Binding.constant(0))
+        HomeView(selectedTab: Binding.constant(0), isSidebarOpen: Binding.constant(false))
     }
 } 
