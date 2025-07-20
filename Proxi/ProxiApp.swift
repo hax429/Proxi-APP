@@ -13,10 +13,12 @@ import CoreBluetooth
 @main
 struct ProxiApp: App {
     @StateObject private var bleManager = BLEManager()
+    @StateObject private var friendsManager = FriendsManager()
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(bleManager)
+                .environmentObject(friendsManager)
         }
     }
 }

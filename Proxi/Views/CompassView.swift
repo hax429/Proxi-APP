@@ -1,11 +1,21 @@
 import SwiftUI
 
 
+//
+//  CompassView 2.swift
+//  Proxi
+//
+//  Created by Gabriel Wang on 7/20/25.
+//
+
+
+import SwiftUI
+
 struct CompassView: View {
     @Binding var selectedTab: Int
-    @EnvironmentObject var bleManager: BLEManager // Use the same BLEManager instance
-    @State private var hasFriends: Bool = false // Simulate if user has paired friends
-    @State private var deviceHeading: Double = 0 // Device orientation
+    @EnvironmentObject var bleManager: BLEManager
+    @EnvironmentObject var friendsManager: FriendsManager // Add this
+    @State private var deviceHeading: Double = 0
     @State private var selectedFriend: Friend? = nil
     @Binding var isSidebarOpen: Bool
     
@@ -14,12 +24,15 @@ struct CompassView: View {
         bleManager.isConnected
     }
     
-    // Mock data for demonstration
-    let mockFriends = [
-        Friend(id: "1", name: "Alex", distance: 45, bearing: 45, elevation: 12, color: .blue),
-        Friend(id: "2", name: "Jamie", distance: 120, bearing: 180, elevation: -8, color: .green),
-        Friend(id: "3", name: "Sam", distance: 85, bearing: 270, elevation: 0, color: .orange)
-    ]
+    // Computed property to check if user has friends
+    private var hasFriends: Bool {
+        !friendsManager.friends.isEmpty
+    }
+    
+    // Get friends for compass display
+    private var compassFriends: [Friend] {
+        friendsManager.getCompassFriends()
+    }
     
     var body: some View {
         ZStack {
@@ -151,7 +164,7 @@ struct CompassView: View {
                     }
                 } else {
                     CompassInterfaceView(
-                        friends: mockFriends,
+                        friends: compassFriends, // Use real friends data
                         deviceHeading: deviceHeading,
                         selectedFriend: $selectedFriend
                     )
@@ -189,6 +202,18 @@ struct CompassView: View {
         }
     }
 }
+
+// Keep all the other supporting views (EmptyCompassView, CompassInterfaceView, etc.) the same
+// Just the main CompassView struct changes
+
+struct CompassView_Previews: PreviewProvider {
+    static var previews: some View {
+        CompassView(selectedTab: Binding.constant(1), isSidebarOpen: Binding.constant(false))
+            .environmentObject(BLEManager())
+            .environmentObject(FriendsManager()) // Add this
+    }
+}
+
 struct EmptyCompassView: View {
     var body: some View {
         VStack(spacing: 32) {
@@ -482,8 +507,4 @@ struct Friend: Identifiable {
     let color: Color
 }
 
-struct CompassView_Previews: PreviewProvider {
-    static var previews: some View {
-        CompassView(selectedTab: Binding.constant(1), isSidebarOpen: Binding.constant(false))
-    }
-}
+

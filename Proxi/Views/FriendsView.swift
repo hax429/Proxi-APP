@@ -1,27 +1,18 @@
+
 import SwiftUI
 import CoreBluetooth
 
 struct FriendsView: View {
     @EnvironmentObject var bleManager: BLEManager
-    @State private var hasPairedProxi = false // Simulate if user has paired their own Proxi
+    @EnvironmentObject var friendsManager: FriendsManager // Add this
     @Binding var selectedTab: Int
-    @State private var selectedFriendsTab: Int = 0 // 0: Paired, 1: In Range, 2: Nearby, 3: Requests
-
-    // Mock data for demonstration
-    @State private var friends: [FriendProfile] = [
-        FriendProfile(id: "1", name: "Alex Chen", status: "Online", lastActive: Date(), isOnline: true, avatar: "AC"),
-        FriendProfile(id: "2", name: "Jamie Smith", status: "Nearby", lastActive: Date(), isOnline: true, avatar: "JS")
-    ]
-    @State private var nearbyProxis: [ProxiDevice] = [
-        ProxiDevice(id: "4", name: "Taylor's Proxi", distance: 15, isOnline: true, lastSeen: Date()),
-        ProxiDevice(id: "5", name: "Morgan's Proxi", distance: 45, isOnline: true, lastSeen: Date())
-    ]
-    @State private var incomingRequests: [FriendProfile] = [
-        FriendProfile(id: "6", name: "Jordan Kim", status: "Requesting", lastActive: Date(), isOnline: true, avatar: "JK")
-    ]
-    @State private var sentRequests: Set<String> = []
-    
+    @State private var selectedFriendsTab: Int = 0
     @Binding var isSidebarOpen: Bool
+
+    // Computed property that uses BLE connection status
+    private var hasPairedProxi: Bool {
+        bleManager.isConnected
+    }
 
     var body: some View {
         ZStack {
@@ -33,6 +24,8 @@ struct FriendsView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
+                            // Connection status header when paired
+                            connectionStatusHeader
                             pairedFriendsSection
                             nearbyProxisSection
                             incomingRequestsSection
@@ -42,6 +35,76 @@ struct FriendsView: View {
                 }
             }
         }
+        .onChange(of: bleManager.isConnected) { isConnected in
+            if isConnected {
+                // Device just connected - provide haptic feedback
+                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                impactFeedback.impactOccurred()
+            }
+        }
+    }
+
+    // MARK: - Connection Status Header
+    private var connectionStatusHeader: some View {
+        HStack(spacing: 16) {
+            // Proxi status indicator
+            ZStack {
+                Circle()
+                    .fill(bleManager.isConnected ? Color.green : Color.red)
+                    .frame(width: 16, height: 16)
+                
+                if bleManager.isConnected {
+                    Circle()
+                        .stroke(Color.green.opacity(0.3), lineWidth: 2)
+                        .frame(width: 24, height: 24)
+                        .scaleEffect(1.2)
+                        .opacity(0.8)
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(bleManager.connectionStatus)
+                    .font(.headline)
+                    .foregroundColor(.white)
+                
+                if bleManager.isConnected {
+                    Text("Ready to discover friends")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.7))
+                } else {
+                    Text("Connection lost")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+            }
+            
+            Spacer()
+            
+            if bleManager.isConnected && bleManager.rssi != 0 {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Signal")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                    Text("\(bleManager.rssi) dBm")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(signalStrengthColor)
+                }
+            }
+        }
+        .padding()
+        .background(Color(hex: "232229"))
+        .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
+    
+    private var signalStrengthColor: Color {
+        if bleManager.rssi >= -50 { return .green }
+        else if bleManager.rssi >= -70 { return .yellow }
+        else { return .red }
     }
 
     // MARK: - Paired Friends
@@ -53,7 +116,7 @@ struct FriendsView: View {
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 Spacer()
-                Text("\(friends.count)")
+                Text("\(friendsManager.friends.count)")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.6))
                     .padding(.horizontal, 8)
@@ -61,26 +124,15 @@ struct FriendsView: View {
                     .background(Color.white.opacity(0.1))
                     .cornerRadius(8)
             }
-            if friends.isEmpty {
+            if friendsManager.friends.isEmpty {
                 emptyFriendsView(text: "No paired friends yet.")
             } else {
                 VStack(spacing: 8) {
-                    ForEach(friends) { friend in
+                    ForEach(friendsManager.friends) { friend in
                         HStack {
                             FriendsListRowView(friend: friend, showLastActive: false)
                             Button(action: {
-                                // Remove from friends and add to nearbyProxis
-                                if let idx = friends.firstIndex(where: { $0.id == friend.id }) {
-                                    let proxi = ProxiDevice(
-                                        id: friend.id,
-                                        name: friend.name,
-                                        distance: Int.random(in: 10...100),
-                                        isOnline: friend.isOnline,
-                                        lastSeen: Date()
-                                    )
-                                    nearbyProxis.append(proxi)
-                                    friends.remove(at: idx)
-                                }
+                                friendsManager.removeFriend(friend)
                             }) {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundColor(.red)
@@ -94,7 +146,6 @@ struct FriendsView: View {
         }
     }
     
-      
     // MARK: - Incoming Requests
     private var incomingRequestsSection: some View {
         VStack(spacing: 16) {
@@ -104,7 +155,7 @@ struct FriendsView: View {
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 Spacer()
-                Text("\(incomingRequests.count)")
+                Text("\(friendsManager.incomingRequests.count)")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.6))
                     .padding(.horizontal, 8)
@@ -112,20 +163,16 @@ struct FriendsView: View {
                     .background(Color.white.opacity(0.1))
                     .cornerRadius(8)
             }
-            if incomingRequests.isEmpty {
+            if friendsManager.incomingRequests.isEmpty {
                 emptyFriendsView(text: "No incoming requests.")
             } else {
                 VStack(spacing: 8) {
-                    ForEach(incomingRequests) { friend in
+                    ForEach(friendsManager.incomingRequests) { friend in
                         HStack(alignment: .center) {
                             FriendsListRowView(friend: friend)
                             VStack(spacing: 8) {
                                 Button(action: {
-                                    // Accept logic: move to friends, remove from incomingRequests, ensure not in nearbyProxis
-                                    friends.removeAll { $0.id == friend.id }
-                                    nearbyProxis.removeAll { $0.id == friend.id }
-                                    friends.append(friend)
-                                    incomingRequests.removeAll { $0.id == friend.id }
+                                    friendsManager.acceptFriendRequest(friend)
                                 }) {
                                     Image(systemName: "checkmark.circle.fill")
                                         .font(.title2)
@@ -134,19 +181,7 @@ struct FriendsView: View {
                                 }
                                 .buttonStyle(PlainButtonStyle())
                                 Button(action: {
-                                    // Decline logic: move to nearbyProxis, remove from incomingRequests, ensure not in friends
-                                    friends.removeAll { $0.id == friend.id }
-                                    incomingRequests.removeAll { $0.id == friend.id }
-                                    if !nearbyProxis.contains(where: { $0.id == friend.id }) {
-                                        let proxi = ProxiDevice(
-                                            id: friend.id,
-                                            name: friend.name,
-                                            distance: Int.random(in: 10...100),
-                                            isOnline: friend.isOnline,
-                                            lastSeen: Date()
-                                        )
-                                        nearbyProxis.append(proxi)
-                                    }
+                                    friendsManager.declineFriendRequest(friend)
                                 }) {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.title2)
@@ -161,6 +196,7 @@ struct FriendsView: View {
             }
         }
     }
+    
     // MARK: - Empty State
     private func emptyFriendsView(text: String) -> some View {
         VStack(spacing: 16) {
@@ -181,12 +217,11 @@ struct FriendsView: View {
         )
     }
     
-    // MARK: - Unpaired State (User hasn't paired their own Proxi)
+    // MARK: - Unpaired State
     private var unpairedStateView: some View {
         VStack(spacing: 32) {
             Spacer()
             
-            // Large Proxi device illustration
             ZStack {
                 Circle()
                     .fill(
@@ -220,9 +255,20 @@ struct FriendsView: View {
                     .foregroundColor(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
+                
+                if bleManager.isScanning {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.8)
+                        Text("Scanning for devices...")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding(.top, 8)
+                }
             }
             
-            // Pairing button
             Button(action: { selectedTab = 4 }) {
                 HStack(spacing: 12) {
                     Image(systemName: "link.circle.fill")
@@ -250,124 +296,6 @@ struct FriendsView: View {
         .padding()
     }
     
-    // MARK: - Paired State (User has paired their Proxi)
-    private var pairedStateView: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                // Status Header
-                statusHeader
-                
-                // Friends List
-                friendsListSection
-                
-                // Nearby Proxis
-                nearbyProxisSection
-                
-                // Quick Actions
-                quickActionsSection
-            }
-            .padding()
-        }
-    }
-    
-    private var statusHeader: some View {
-        HStack(spacing: 16) {
-            // Proxi status indicator
-            ZStack {
-                Circle()
-                    .fill(Color.green)
-                    .frame(width: 16, height: 16)
-                
-                Circle()
-                    .stroke(Color.green.opacity(0.3), lineWidth: 2)
-                    .frame(width: 24, height: 24)
-                    .scaleEffect(1.2)
-                    .opacity(0.8)
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Proxi Connected")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                Text("Ready to discover friends")
-                    .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.7))
-            }
-            
-            Spacer()
-            
-            
-        }
-        .padding()
-        .background(Color(hex: "232229"))
-        .cornerRadius(16)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
-    }
-    
-    private var friendsListSection: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Text("Friends")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                Spacer()
-                Text("\(friends.count)")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(8)
-            }
-            
-            if friends.isEmpty {
-                emptyFriendsView
-            } else {
-                friendsList
-            }
-        }
-    }
-    
-    private var emptyFriendsView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "person.2.slash")
-                .font(.system(size: 40))
-                .foregroundColor(.white.opacity(0.4))
-            
-            Text("No Friends Yet")
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            Text("Discover and connect with nearby Proxi users")
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.7))
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
-        .background(Color(hex: "232229"))
-        .cornerRadius(16)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
-    }
-    
-    private var friendsList: some View {
-        VStack(spacing: 8) {
-            ForEach(friends) { friend in
-                FriendsListRowView(friend: friend)
-                    .onTapGesture {
-                        // selectedFriend = friend // This state variable is no longer used
-                    }
-            }
-        }
-    }
-    
     private var nearbyProxisSection: some View {
         VStack(spacing: 16) {
             HStack {
@@ -376,7 +304,7 @@ struct FriendsView: View {
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 Spacer()
-                Text("\(nearbyProxis.count)")
+                Text("\(friendsManager.nearbyProxis.count)")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.6))
                     .padding(.horizontal, 8)
@@ -385,7 +313,7 @@ struct FriendsView: View {
                     .cornerRadius(8)
             }
             
-            if nearbyProxis.isEmpty {
+            if friendsManager.nearbyProxis.isEmpty {
                 emptyNearbyView
             } else {
                 nearbyProxisList
@@ -420,66 +348,22 @@ struct FriendsView: View {
     
     private var nearbyProxisList: some View {
         VStack(spacing: 8) {
-            ForEach(nearbyProxis) { proxi in
-                NearbyProxiRowView(proxi: proxi)
+            ForEach(friendsManager.nearbyProxis) { proxi in
+                NearbyProxiRowView(proxi: proxi, onSendRequest: {
+                    friendsManager.sendFriendRequest(to: proxi.id)
+                })
             }
         }
     }
-    
-    private var quickActionsSection: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Text("Quick Actions")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                Spacer()
-            }
-            
-            HStack(spacing: 12) {
-                quickActionButton(
-                    icon: "antenna.radiowaves.left.and.right",
-                    title: "Scan",
-                    subtitle: "Find Proxis",
-                    action: { }
-                )
-                
-                quickActionButton(
-                    icon: "person.badge.plus",
-                    title: "Add Friend",
-                    subtitle: "Send request",
-                    action: { }
-                )
-            }
-        }
-    }
-    
-    private func quickActionButton(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 24))
-                    .foregroundColor(.blue)
-                
-                Text(title)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.7))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-            .background(Color(hex: "232229"))
-            .cornerRadius(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
+}
+
+// Keep all the supporting views the same (FriendsListRowView, NearbyProxiRowView, etc.)
+
+struct FriendsView_Previews: PreviewProvider {
+    static var previews: some View {
+        FriendsView(selectedTab: Binding.constant(2), isSidebarOpen: Binding.constant(false))
+            .environmentObject(BLEManager())
+            .environmentObject(FriendsManager()) // Add this
     }
 }
 
@@ -521,13 +405,9 @@ struct FriendsListRowView: View {
                             .frame(width: 8, height: 8)
                     }
                 }
-                
-                
             }
             
             Spacer()
-            
-            
         }
         .padding()
         .background(Color(hex: "232229"))
@@ -541,6 +421,7 @@ struct FriendsListRowView: View {
 
 struct NearbyProxiRowView: View {
     let proxi: ProxiDevice
+    let onSendRequest: () -> Void
     @State private var isRequesting = false
     
     var body: some View {
@@ -570,7 +451,9 @@ struct NearbyProxiRowView: View {
                     }
                 }
                 
-                
+                Text("\(proxi.distance)m away")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.7))
             }
             
             Spacer()
@@ -578,6 +461,7 @@ struct NearbyProxiRowView: View {
             // Send request button
             Button(action: {
                 isRequesting = true
+                onSendRequest()
                 // Simulate request sending
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     isRequesting = false
@@ -667,9 +551,4 @@ struct ProxiDevice: Identifiable {
     let lastSeen: Date
 }
 
-struct FriendsView_Previews: PreviewProvider {
-    static var previews: some View {
-        FriendsView(selectedTab: Binding.constant(2), isSidebarOpen: Binding.constant(false))
-    }
-}
 
