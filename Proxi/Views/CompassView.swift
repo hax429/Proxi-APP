@@ -14,14 +14,14 @@ import SwiftUI
 struct CompassView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var bleManager: BLEManager
-    @EnvironmentObject var friendsManager: FriendsManager // Add this
+    @EnvironmentObject var friendsManager: FriendsManager
     @State private var deviceHeading: Double = 0
     @State private var selectedFriend: Friend? = nil
     @Binding var isSidebarOpen: Bool
     
     // Computed property that uses BLE connection status
     private var hasPairedProxi: Bool {
-        bleManager.isConnected
+        true // Replace with bleManager.isConnected if needed
     }
     
     // Computed property to check if user has friends
@@ -37,7 +37,7 @@ struct CompassView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            VStack(spacing: -100) {
+            VStack(spacing: 0) {
                 TopBarView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
                 
                 if !hasPairedProxi {
@@ -163,31 +163,95 @@ struct CompassView: View {
                         }
                     }
                 } else {
-                    CompassInterfaceView(
-                        friends: compassFriends, // Use real friends data
-                        deviceHeading: deviceHeading,
-                        selectedFriend: $selectedFriend
-                    )
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        // Compass takes up most of the space
+                        ZStack {
+                            Circle()
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                .frame(width: 340, height: 340)
+                            // Cardinal directions
+                            CompassDirections()
+                            // Only show selected friend's arrow
+                            if let friend = selectedFriend ?? compassFriends.first {
+                                FriendArrow(
+                                    friend: friend,
+                                    deviceHeading: deviceHeading,
+                                    isSelected: true
+                                )
+                            }
+                            // Center indicator
+                            Circle()
+                                .fill(Color.white.opacity(0.1))
+                                .frame(width: 24, height: 24)
+                        }
+                        .frame(height: 380)
+                        .padding(.top, 24)
+                        Spacer(minLength: 0)
+                        // Friend selector chips
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(compassFriends) { friend in
+                                    Button(action: {
+                                        selectedFriend = friend
+                                    }) {
+                                        HStack(spacing: 8) {
+                                            Circle()
+                                                .fill(friend.color)
+                                                .frame(width: 28, height: 28)
+                                                .overlay(
+                                                    Text(String(friend.name.prefix(1)))
+                                                        .font(.caption)
+                                                        .fontWeight(.bold)
+                                                        .foregroundColor(.white)
+                                                )
+                                            Text(friend.name)
+                                                .font(.subheadline)
+                                                .foregroundColor(.white)
+                                        }
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(selectedFriend?.id == friend.id ? friend.color.opacity(0.3) : Color.white.opacity(0.08))
+                                        .cornerRadius(16)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                        }
+                        // Selected friend info
+                        if let friend = selectedFriend ?? compassFriends.first {
+                            VStack(spacing: 6) {
+                                Text(friend.name)
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                HStack(spacing: 16) {
+                                    Label("\(friend.distance)m", systemImage: "location.north.fill")
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .font(.subheadline)
+                                    if friend.elevation != 0 {
+                                        Label("\(friend.elevation > 0 ? "+" : "")\(friend.elevation)m", systemImage: friend.elevation > 0 ? "arrow.up" : "arrow.down")
+                                            .foregroundColor(.white.opacity(0.8))
+                                            .font(.subheadline)
+                                    }
+                                }
+                            }
+                            .padding(.top, 8)
+                        }
+                        Spacer(minLength: 0)
+                    }
                 }
                 Spacer()
-                
             }
         }
         .onAppear {
-            // Start heading updates and begin scanning if not connected
             startHeadingUpdates()
-            if !bleManager.isConnected && !bleManager.isScanning {
-                // Optionally start scanning automatically when view appears
-                // bleManager.startScanning()
-            }
         }
         .onChange(of: bleManager.isConnected) { isConnected in
             if isConnected {
-                // Device just connected - you could add haptic feedback here
                 let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
                 impactFeedback.impactOccurred()
-                
-                // Stop scanning when connected
                 if bleManager.isScanning {
                     bleManager.stopScanning()
                 }
@@ -331,67 +395,16 @@ struct FriendArrow: View {
         (friend.bearing - deviceHeading).truncatingRemainder(dividingBy: 360)
     }
     
-    private var arrowLength: CGFloat {
-        // Scale arrow length based on distance (min 30, max 120)
-        let minLength: CGFloat = 30
-        let maxLength: CGFloat = 120
-        let scale = min(CGFloat(friend.distance) / 150.0, 1.0)
-        return minLength + (maxLength - minLength) * scale
-    }
-    
     var body: some View {
-        VStack(spacing: 4) {
-            // Arrow
-            ZStack {
-                // Arrow shaft
-                Rectangle()
-                    .fill(friend.color)
-                    .frame(width: 3, height: arrowLength)
-                    .opacity(isSelected ? 1.0 : 0.7)
-                
-                // Arrow head
-                Triangle()
-                    .fill(friend.color)
-                    .frame(width: 12, height: 8)
-                    .offset(y: -arrowLength/2 - 4)
-                    .opacity(isSelected ? 1.0 : 0.7)
-                
-                // Elevation indicator
-                if friend.elevation != 0 {
-                    Image(systemName: friend.elevation > 0 ? "arrow.up" : "arrow.down")
-                        .foregroundColor(friend.color)
-                        .font(.caption)
-                        .offset(y: -arrowLength/2 - 20)
-                }
-            }
+        ZStack {
+            Image("compass")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 300, height: 300)
+                .rotationEffect(.degrees(arrowRotation))
+                .opacity(isSelected ? 1.0 : 0.7)
             
-            // Friend name and distance
-            if isSelected {
-                VStack(spacing: 2) {
-                    Text(friend.name)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                    
-                    Text("\(friend.distance)m")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.7))
-                    
-                    if friend.elevation != 0 {
-                        Text("\(friend.elevation > 0 ? "+" : "")\(friend.elevation)m")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.black.opacity(0.6))
-                .cornerRadius(8)
-            }
         }
-        .rotationEffect(.degrees(arrowRotation))
-        .scaleEffect(isSelected ? 1.1 : 1.0)
-        .animation(.easeInOut(duration: 0.2), value: isSelected)
     }
 }
 
