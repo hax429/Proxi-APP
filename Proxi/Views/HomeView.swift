@@ -3,7 +3,9 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject var bleManager: BLEManager
     @Binding var selectedTab: Int
-    @State private var isPaired: Bool = false // Simulate pairing status
+    private var isPaired: Bool{
+        bleManager.isConnected
+    }
     // Example data for demo purposes
     let recentActivities = [
         "Paired with Proxi Mini 2 hours ago",
@@ -50,20 +52,43 @@ struct HomeView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             
                             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                                FeatureCard(icon: "location", title: "Compass", description: "Find your friends with ease.", gradient: Gradient(colors: [Color.blue, Color.purple]))
-                                FeatureCard(icon: "person.3", title: "Friends", description: "Connect and manage your Proxi friends.", gradient: Gradient(colors: [Color.pink, Color.orange]))
-                                FeatureCard(icon: "magnifyingglass", title: "Discover", description: "Find new people and devices nearby.", gradient: Gradient(colors: [Color.green, Color.teal]))
-                                FeatureCard(icon: "gearshape", title: "Settings", description: "Pair your Proxi and manage preferences.", gradient: Gradient(colors: [Color.gray, Color.indigo]))
+                                
+                                Button(action: {
+                                    selectedTab = 1 // Assuming Compass is tab 1
+                                }) {
+                                    FeatureCard(icon: "location", title: "Compass", description: "Find your friends with ease.", gradient: Gradient(colors: [Color.blue, Color.purple]))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                
+                                Button(action: {
+                                    selectedTab = 2 // Assuming Friends is tab 2
+                                }) {
+                                    FeatureCard(icon: "person.3", title: "Friends", description: "Connect and manage your Proxi friends.", gradient: Gradient(colors: [Color.pink, Color.orange]))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                
+                                Button(action: {
+                                    selectedTab = 3 // Assuming Discover is tab 3
+                                }) {
+                                    FeatureCard(icon: "magnifyingglass", title: "Discover", description: "Find new people and devices nearby.", gradient: Gradient(colors: [Color.green, Color.teal]))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                
+                                Button(action: {
+                                    selectedTab = 4 // Assuming Settings is tab 4
+                                }) {
+                                    FeatureCard(icon: "gearshape", title: "Settings", description: "Pair your Proxi and manage preferences.", gradient: Gradient(colors: [Color.gray, Color.indigo]))
+                                }
+                                .buttonStyle(PlainButtonStyle())
                             }
-                            .padding(.horizontal, 8)
+                            .padding(.horizontal, 8)                         
                         }
                         .padding(.horizontal, 16)
                         
-                        // How It Works Section
-                        HowItWorksSection()
+                        if !isPaired {
+                            HowItWorksSection()
+                        }
                         
-                        
-               
                         
                         // Status Card or Get Started Button]
                         if !isPaired {

@@ -1,8 +1,12 @@
 import SwiftUI
+import PhotosUI
 
 struct TopBarView: View {
     @Binding var selectedTab: Int
     @Binding var isSidebarOpen: Bool
+    @StateObject private var userManager = UserManager()
+    @State private var showingImagePicker = false
+    @State private var selectedImage: PhotosPickerItem?
     
     var body: some View {
         HStack {
@@ -30,19 +34,45 @@ struct TopBarView: View {
             
             Spacer()
             
-            // Profile image
-            Button(action: {
-                selectedTab = 4
-                isSidebarOpen = false // Close sidebar when navigating
-            }) {
-                Image("Profile placeholder") // Replace with actual asset if available
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 36, height: 36)
-                    .clipShape(Circle())
-                    .padding(.trailing, 24)
+            // Profile image with PhotosPicker
+            PhotosPicker(selection: $selectedImage,
+                        matching: .images,
+                        photoLibrary: .shared()) {
+                if let profileImage = userManager.getProfileImage() {
+                    Image(uiImage: profileImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 36, height: 36)
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white, lineWidth: 2)
+                        )
+                } else {
+                    Image("Profile placeholder")
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 36, height: 36)
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                        )
+                }
             }
-            .buttonStyle(PlainButtonStyle())
+            .padding(.trailing, 24)
+            .onChange(of: selectedImage) { newItem in
+                Task {
+                    if let newItem = newItem {
+                        if let data = try? await newItem.loadTransferable(type: Data.self),
+                           let image = UIImage(data: data) {
+                            DispatchQueue.main.async {
+                                _ = userManager.saveProfileImage(image)
+                            }
+                        }
+                    }
+                }
+            }
         }
         .frame(height: 60)
         .background(Color.black)

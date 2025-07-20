@@ -14,6 +14,7 @@ struct DeviceRowView: View {
     let isConnected: Bool
     let connectedPeripheralID: UUID?
     let onConnect: () -> Void
+    let isDeveloperMode: Bool
     
     var body: some View {
         Button(action: onConnect) {
@@ -32,9 +33,11 @@ struct DeviceRowView: View {
             Text(peripheral.name ?? "Unknown Device")
                 .font(.subheadline)
                 .foregroundColor(.primary)
-            Text(peripheral.identifier.uuidString)
-                .font(.caption)
-                .foregroundColor(.secondary)
+            if isDeveloperMode {
+                Text(peripheral.identifier.uuidString)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
     }
     

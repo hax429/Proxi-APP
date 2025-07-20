@@ -8,6 +8,20 @@
 import SwiftUI
 import Combine
 
+
+// Data Models
+struct Friend: Identifiable {
+    let id: String
+    let name: String
+    let distance: Int // in meters
+    let bearing: Double // in degrees (0-360)
+    let elevation: Int // in meters (positive = above, negative = below)
+    let color: Color
+}
+
+
+
+
 // MARK: - Enhanced Friends Manager with Location Tracking
 class FriendsManager: ObservableObject {
     @Published var friends: [FriendProfile] = []
@@ -193,6 +207,9 @@ struct FriendLocation {
     var lastUpdate: Date
 }
 
+
+
+
 // Extension to add convenience methods
 extension FriendsManager {
     var onlineFriendsCount: Int {
@@ -212,3 +229,6 @@ extension FriendsManager {
         return getCompassFriends().filter { $0.distance <= Int(maxDistance) }
     }
 }
+
+
+
