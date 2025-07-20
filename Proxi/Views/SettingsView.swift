@@ -2,19 +2,23 @@ import SwiftUI
 import CoreBluetooth
 
 struct SettingsView: View {
+    @Binding var selectedTab: Int
     @StateObject private var bleManager = BLEManager()
     @State private var showingDebugLog = false
-    @State private var selectedTab = 0
     @State private var showingProfile = false
     @State private var showingNotifications = false
     @State private var showingPrivacy = false
     @State private var showingAbout = false
+    @State private var displayName: String = SettingsView.loadDisplayName()
+    @State private var editingDisplayName: Bool = false
+    @State private var tempDisplayName: String = ""
+    @FocusState private var isEditingName: Bool
     
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
-                TopBarView()
+                TopBarView(selectedTab: $selectedTab)
                 
                 ScrollView {
                     VStack(spacing: 24) {
@@ -64,50 +68,91 @@ struct SettingsView: View {
                     .foregroundColor(.white)
                 Spacer()
             }
-            
-            Button(action: { showingProfile = true }) {
-                HStack(spacing: 16) {
-                    // Profile Avatar
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.blue, Color.purple]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 60, height: 60)
-                        
-                        Text("JD")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
+            HStack(spacing: 16) {
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    if editingDisplayName {
+                        HStack(spacing: 8) {
+                            TextField("Display Name", text: $tempDisplayName)
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .disableAutocorrection(true)
+                                .focused($isEditingName)
+                                .padding(6)
+                                .background(Color.white.opacity(0.08))
+                                .cornerRadius(8)
+                                .foregroundColor(.white)
+                            Button("Save") {
+                                let trimmed = tempDisplayName.trimmingCharacters(in: .whitespaces)
+                                if !trimmed.isEmpty {
+                                    displayName = trimmed
+                                    saveDisplayName(trimmed)
+                                }
+                                editingDisplayName = false
+                            }
+                            .foregroundColor(.blue)
+                            .disabled(tempDisplayName.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            Text(displayName)
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .onTapGesture {
+                                    tempDisplayName = displayName
+                                    editingDisplayName = true
+                                    isEditingName = true
+                                }
+                            Button(action: {
+                                tempDisplayName = displayName
+                                editingDisplayName = true
+                                isEditingName = true
+                            }) {
+                                Image(systemName: "pencil")
+                                    .foregroundColor(.white.opacity(0.5))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
                     }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("John Doe")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        Text("john.doe@email.com")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "chevron.right")
-                        .foregroundColor(.white.opacity(0.5))
+                    Text("Click to edit display name")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.7))
                 }
-                .padding()
-                .background(Color(hex: "232229"))
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                )
+                Spacer()
             }
-            .buttonStyle(PlainButtonStyle())
+            .padding()
+            .background(Color(hex: "232229"))
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            )
+        }
+    }
+    
+    // MARK: - Display Name Helpers
+    static func loadDisplayName() -> String {
+        if let saved = UserDefaults.standard.string(forKey: "displayName") {
+            return saved
+        } else {
+            let randomId = Int.random(in: 1000...9999)
+            let generated = "User\(randomId)"
+            UserDefaults.standard.set(generated, forKey: "displayName")
+            return generated
+        }
+    }
+    func saveDisplayName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        UserDefaults.standard.set(trimmed, forKey: "displayName")
+    }
+    func initials(for name: String) -> String {
+        let comps = name.split(separator: " ")
+        if comps.count >= 2 {
+            return String(comps[0].prefix(1)) + String(comps[1].prefix(1))
+        } else if let first = comps.first {
+            return String(first.prefix(2))
+        } else {
+            return "U"
         }
     }
     
@@ -449,24 +494,12 @@ struct SettingsView: View {
             }
             
             VStack(spacing: 8) {
-                settingsRow(
-                    icon: "questionmark.circle.fill",
-                    title: "Help & FAQ",
-                    subtitle: "Get help with the app",
-                    action: { }
-                )
                 
-                settingsRow(
-                    icon: "envelope.fill",
-                    title: "Contact Support",
-                    subtitle: "Send us a message",
-                    action: { }
-                )
                 
                 settingsRow(
                     icon: "info.circle.fill",
                     title: "About Proxi",
-                    subtitle: "App version and info",
+                    subtitle: "Meet the Team",
                     action: { showingAbout = true }
                 )
             }
@@ -588,6 +621,6 @@ struct AboutView: View {
 
 struct SettingsView_Previews: PreviewProvider {
     static var previews: some View {
-        SettingsView()
+        SettingsView(selectedTab: Binding.constant(4))
     }
 } 

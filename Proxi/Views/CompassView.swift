@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct CompassView: View {
+    @Binding var selectedTab: Int
+    @State private var hasPairedProxi: Bool = false // Simulate if user has paired their own Proxi
     @State private var hasFriends: Bool = false // Simulate if user has paired friends
     @State private var deviceHeading: Double = 0 // Device orientation
     @State private var selectedFriend: Friend? = nil
@@ -15,11 +17,91 @@ struct CompassView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            VStack(spacing: 0) {
-                TopBarView()
+            VStack(spacing: -100) {
+                TopBarView(selectedTab: $selectedTab)
                 
-                if !hasFriends {
+                if !hasPairedProxi {
+                    VStack(spacing: 32) {
+                        Spacer()
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [Color.blue.opacity(0.2), Color.purple.opacity(0.2)]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 200, height: 200)
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 60))
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [Color.blue, Color.purple]),
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                        }
+                        VStack(spacing: 16) {
+                            Text("Pair Your Proxi First")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                            Text("To connect with friends, you need to pair your Proxi device first. This enables you to discover and connect with other Proxi users nearby.")
+                                .font(.body)
+                                .foregroundColor(.white.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 32)
+                        }
+                        Button(action: { selectedTab = 4 }) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "link.circle.fill")
+                                    .font(.system(size: 20))
+                                Text("Pair My Proxi")
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [Color.blue, Color.purple]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(16)
+                            .padding(.horizontal, 32)
+                        }
+                        Spacer()
+                    }
+                    .padding()
+                } else if !hasFriends {
                     EmptyCompassView()
+                    Button(action: { selectedTab = 2 }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.3.fill")
+                                .font(.system(size: 20))
+                            Text("Add Friends")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.blue, Color.purple]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(16)
+                        .padding(.horizontal, 32)
+                        .padding(.bottom, 200)
+                    }
                 } else {
                     CompassInterfaceView(
                         friends: mockFriends,
@@ -27,6 +109,8 @@ struct CompassView: View {
                         selectedFriend: $selectedFriend
                     )
                 }
+                Spacer()
+                
             }
         }
         .onAppear {
@@ -93,7 +177,7 @@ struct EmptyCompassView: View {
             
             Spacer()
         }
-        .padding()
+        .padding(.top, 80)
     }
 }
 
@@ -344,6 +428,6 @@ struct Friend: Identifiable {
 
 struct CompassView_Previews: PreviewProvider {
     static var previews: some View {
-        CompassView()
+        CompassView(selectedTab: Binding.constant(1))
     }
 } 

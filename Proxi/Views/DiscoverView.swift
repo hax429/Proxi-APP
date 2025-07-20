@@ -1,11 +1,12 @@
 import SwiftUI
 
 struct DiscoverView: View {
+    @Binding var selectedTab: Int
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
-                TopBarView()
+                TopBarView(selectedTab: $selectedTab)
                 Spacer()
                 Text("Discover")
                     .font(.largeTitle)
@@ -18,6 +19,6 @@ struct DiscoverView: View {
 
 struct DiscoverView_Previews: PreviewProvider {
     static var previews: some View {
-        DiscoverView()
+        DiscoverView(selectedTab: Binding.constant(3))
     }
 } 

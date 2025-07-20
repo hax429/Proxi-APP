@@ -18,7 +18,7 @@ struct HomeView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
-                TopBarView()
+                TopBarView(selectedTab: $selectedTab)
                 ScrollView {
                     VStack(spacing: 28) {
                         // Gradient Welcome Header with Logo
@@ -303,6 +303,6 @@ struct FeatureCard: View {
 
 struct HomeView_Previews: PreviewProvider {
     static var previews: some View {
-        HomeView(selectedTab: .constant(0))
+        HomeView(selectedTab: Binding.constant(0))
     }
 } 

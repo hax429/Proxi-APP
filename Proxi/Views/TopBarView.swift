@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct TopBarView: View {
+    @Binding var selectedTab: Int
     var body: some View {
         HStack {
             // Hamburger menu
@@ -17,14 +18,23 @@ struct TopBarView: View {
                 .frame(height: 40)
             Spacer()
             // Profile image
-            Image("Profile placeholder") // Replace with actual asset if available
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 36, height: 36)
-                .clipShape(Circle())
-                .padding(.trailing, 24)
+            Button(action: { selectedTab = 4 }) {
+                Image("Profile placeholder") // Replace with actual asset if available
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 36, height: 36)
+                    .clipShape(Circle())
+                    .padding(.trailing, 24)
+            }
+            .buttonStyle(PlainButtonStyle())
         }
         .frame(height: 60)
         .background(Color.black)
+    }
+}
+
+struct TopBarView_Previews: PreviewProvider {
+    static var previews: some View {
+        TopBarView(selectedTab: .constant(0))
     }
 } 

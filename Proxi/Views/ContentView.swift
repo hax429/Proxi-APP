@@ -24,7 +24,7 @@ struct ContentView: View {
                     }
                 }
                 .tag(0)
-            CompassView()
+            CompassView(selectedTab: $selectedTab)
                 .tabItem {
                     VStack {
                         Spacer().frame(height: 20)
@@ -48,7 +48,7 @@ struct ContentView: View {
                     }
                 }
                 .tag(2)
-            DiscoverView()
+            DiscoverView(selectedTab: $selectedTab)
                 .tabItem {
                     VStack {
                         Spacer().frame(height: 20)
@@ -60,7 +60,7 @@ struct ContentView: View {
                     }
                 }
                 .tag(3)
-            SettingsView()
+            SettingsView(selectedTab: $selectedTab)
                 .tabItem {
                     VStack {
                         Spacer().frame(height: 20)

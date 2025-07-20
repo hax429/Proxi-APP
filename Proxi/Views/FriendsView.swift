@@ -4,38 +4,179 @@ import CoreBluetooth
 struct FriendsView: View {
     @StateObject private var bleManager = BLEManager()
     @State private var hasPairedProxi = false // Simulate if user has paired their own Proxi
-    @State private var showingFriendRequests = false
-    @State private var selectedFriend: FriendProfile? = nil
     @Binding var selectedTab: Int
-    
+    @State private var selectedFriendsTab: Int = 0 // 0: Paired, 1: In Range, 2: Nearby, 3: Requests
+
     // Mock data for demonstration
-    @State private var nearbyProxis: [ProxiDevice] = [
-        ProxiDevice(id: "1", name: "Alex's Proxi", distance: 15, isOnline: true, lastSeen: Date()),
-        ProxiDevice(id: "2", name: "Jamie's Proxi", distance: 45, isOnline: true, lastSeen: Date()),
-        ProxiDevice(id: "3", name: "Sam's Proxi", distance: 120, isOnline: false, lastSeen: Date().addingTimeInterval(-300))
-    ]
-    
     @State private var friends: [FriendProfile] = [
         FriendProfile(id: "1", name: "Alex Chen", status: "Online", lastActive: Date(), isOnline: true, avatar: "AC"),
         FriendProfile(id: "2", name: "Jamie Smith", status: "Nearby", lastActive: Date(), isOnline: true, avatar: "JS")
     ]
-    
+    @State private var nearbyProxis: [ProxiDevice] = [
+        ProxiDevice(id: "4", name: "Taylor's Proxi", distance: 15, isOnline: true, lastSeen: Date()),
+        ProxiDevice(id: "5", name: "Morgan's Proxi", distance: 45, isOnline: true, lastSeen: Date())
+    ]
+    @State private var incomingRequests: [FriendProfile] = [
+        FriendProfile(id: "6", name: "Jordan Kim", status: "Requesting", lastActive: Date(), isOnline: true, avatar: "JK")
+    ]
+    @State private var sentRequests: Set<String> = []
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
-                TopBarView()
-                
+                TopBarView(selectedTab: $selectedTab)
                 if !hasPairedProxi {
                     unpairedStateView
                 } else {
-                    pairedStateView
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            pairedFriendsSection
+                            nearbyProxisSection
+                            incomingRequestsSection
+                        }
+                        .padding()
+                    }
                 }
             }
         }
-        .sheet(isPresented: $showingFriendRequests) {
-            FriendRequestsView()
+    }
+
+    // MARK: - Paired Friends
+    private var pairedFriendsSection: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Currently Paired")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                Spacer()
+                Text("\(friends.count)")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.6))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.1))
+                    .cornerRadius(8)
+            }
+            if friends.isEmpty {
+                emptyFriendsView(text: "No paired friends yet.")
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(friends) { friend in
+                        HStack {
+                            FriendsListRowView(friend: friend, showLastActive: false)
+                            Button(action: {
+                                // Remove from friends and add to nearbyProxis
+                                if let idx = friends.firstIndex(where: { $0.id == friend.id }) {
+                                    let proxi = ProxiDevice(
+                                        id: friend.id,
+                                        name: friend.name,
+                                        distance: Int.random(in: 10...100),
+                                        isOnline: friend.isOnline,
+                                        lastSeen: Date()
+                                    )
+                                    nearbyProxis.append(proxi)
+                                    friends.remove(at: idx)
+                                }
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.red)
+                                    .font(.title2)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                }
+            }
         }
+    }
+    
+      
+    // MARK: - Incoming Requests
+    private var incomingRequestsSection: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Incoming Requests")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                Spacer()
+                Text("\(incomingRequests.count)")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.6))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.1))
+                    .cornerRadius(8)
+            }
+            if incomingRequests.isEmpty {
+                emptyFriendsView(text: "No incoming requests.")
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(incomingRequests) { friend in
+                        HStack(alignment: .center) {
+                            FriendsListRowView(friend: friend)
+                            VStack(spacing: 8) {
+                                Button(action: {
+                                    // Accept logic: move to friends, remove from incomingRequests, ensure not in nearbyProxis
+                                    friends.removeAll { $0.id == friend.id }
+                                    nearbyProxis.removeAll { $0.id == friend.id }
+                                    friends.append(friend)
+                                    incomingRequests.removeAll { $0.id == friend.id }
+                                }) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.title2)
+                                        .foregroundColor(.green)
+                                        .padding(8)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                Button(action: {
+                                    // Decline logic: move to nearbyProxis, remove from incomingRequests, ensure not in friends
+                                    friends.removeAll { $0.id == friend.id }
+                                    incomingRequests.removeAll { $0.id == friend.id }
+                                    if !nearbyProxis.contains(where: { $0.id == friend.id }) {
+                                        let proxi = ProxiDevice(
+                                            id: friend.id,
+                                            name: friend.name,
+                                            distance: Int.random(in: 10...100),
+                                            isOnline: friend.isOnline,
+                                            lastSeen: Date()
+                                        )
+                                        nearbyProxis.append(proxi)
+                                    }
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.title2)
+                                        .foregroundColor(.red)
+                                        .padding(8)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // MARK: - Empty State
+    private func emptyFriendsView(text: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "person.2.slash")
+                .font(.system(size: 40))
+                .foregroundColor(.white.opacity(0.4))
+            Text(text)
+                .font(.headline)
+                .foregroundColor(.white)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .background(Color(hex: "232229"))
+        .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
     }
     
     // MARK: - Unpaired State (User hasn't paired their own Proxi)
@@ -153,19 +294,7 @@ struct FriendsView: View {
             
             Spacer()
             
-            // Friend requests badge
-            Button(action: { showingFriendRequests = true }) {
-                ZStack {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 32, height: 32)
-                    
-                    Text("2")
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                }
-            }
+            
         }
         .padding()
         .background(Color(hex: "232229"))
@@ -231,7 +360,7 @@ struct FriendsView: View {
             ForEach(friends) { friend in
                 FriendsListRowView(friend: friend)
                     .onTapGesture {
-                        selectedFriend = friend
+                        // selectedFriend = friend // This state variable is no longer used
                     }
             }
         }
@@ -355,6 +484,7 @@ struct FriendsView: View {
 // MARK: - Supporting Views
 struct FriendsListRowView: View {
     let friend: FriendProfile
+    var showLastActive: Bool = true
     
     var body: some View {
         HStack(spacing: 16) {
@@ -390,21 +520,12 @@ struct FriendsListRowView: View {
                     }
                 }
                 
-                Text(friend.status)
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.7))
+                
             }
             
             Spacer()
             
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("Last active")
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.5))
-                Text(friend.lastActive.formatted(date: .omitted, time: .shortened))
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.7))
-            }
+            
         }
         .padding()
         .background(Color(hex: "232229"))
@@ -447,17 +568,7 @@ struct NearbyProxiRowView: View {
                     }
                 }
                 
-                HStack(spacing: 8) {
-                    Text("\(proxi.distance)m away")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                    
-                    if !proxi.isOnline {
-                        Text("Offline")
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    }
-                }
+                
             }
             
             Spacer()
@@ -556,7 +667,7 @@ struct ProxiDevice: Identifiable {
 
 struct FriendsView_Previews: PreviewProvider {
     static var previews: some View {
-        FriendsView(selectedTab: .constant(2))
+        FriendsView(selectedTab: Binding.constant(2))
     }
 }
 
