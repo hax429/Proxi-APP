@@ -8,10 +8,20 @@ import Foundation
 import SwiftUI
 import CoreBluetooth
 import NearbyInteraction
+import ARKit
 import simd
+import CoreLocation
 
-// MARK: - Message Protocol (Qorvo)
-enum MessageId: UInt8 {
+// MARK: - Settings Helper (temporary)
+class Settings {
+    var isDirectionEnable: Bool {
+        // Check device capabilities - iPhone 14+ supports directional features
+        return true // You can implement actual device checking here
+    }
+}
+
+// MARK: - BLE Message Protocol (Qorvo)
+enum BLEMessageId: UInt8 {
     // Messages from the accessory
     case accessoryConfigurationData = 0x1
     case accessoryUwbDidStart = 0x2
@@ -29,8 +39,83 @@ struct UWBLocation {
     var azimuth: Float = 0
     var elevation: Float = 0
     var direction: simd_float3 = SIMD3<Float>(x: 0, y: 0, z: 0)
+    var horizontalAngle: Float = 0
+    var verticalDirectionEstimate: Int = 0
     var isValid: Bool = false
     var timestamp: Date = Date()
+    var noUpdate: Bool = false
+    var isConverged: Bool = false
+    var supportsDirectionMeasurement: Bool = false
+    
+    // Calibration offset for coordinate system alignment and device heading integration
+    var azimuthOffset: Float = 0.0
+    var deviceHeading: Float = 0.0  // Current device magnetic heading
+    
+    // IMPROVED: Enhanced direction calculations with device heading integration
+    var enhancedAzimuth: Float {
+        // For iPhone 14+, use horizontal angle when available and converged
+        if !supportsDirectionMeasurement && isConverged && horizontalAngle != 0 {
+            // Qorvo approach: Convert horizontal angle to degrees
+            let targetAzimuth = horizontalAngle * 180 / .pi
+            // Apply coordinate system correction (NI uses different reference than magnetic compass)
+            let correctedAzimuth = targetAzimuth + 90.0  // NI angle correction
+            return normalizeAngle(correctedAzimuth)
+        }
+        
+        // Standard calculation for devices with direction support
+        if direction.x != 0 || direction.z != 0 {
+            // Calculate azimuth from 3D direction vector
+            let targetAzimuth = atan2(direction.x, direction.z) * 180 / .pi
+            // Apply coordinate system correction  
+            let correctedAzimuth = targetAzimuth + 90.0  // NI angle correction
+            return normalizeAngle(correctedAzimuth)
+        }
+        
+        return 0
+    }
+    
+    var enhancedElevation: Float {
+        // For iPhone 14+, use vertical direction estimate when converged
+        if !supportsDirectionMeasurement && isConverged {
+            return Float(verticalDirectionEstimate)
+        }
+        
+        // Standard calculation for full direction support
+        if direction.y != 0 || (direction.x != 0 || direction.z != 0) {
+            let elevationRad = atan2(direction.y, sqrt(direction.x * direction.x + direction.z * direction.z))
+            return elevationRad * 180 / .pi
+        }
+        
+        return 0
+    }
+    
+    var calibratedAzimuth: Float {
+        return enhancedAzimuth
+    }
+    
+    // MARK: - Relative bearing calculation (target azimuth relative to device heading)
+    var relativeBearing: Float {
+        let targetAzimuth = enhancedAzimuth
+        let deviceHeadingFloat = deviceHeading
+        
+        // Calculate relative bearing
+        var bearing = targetAzimuth - deviceHeadingFloat
+        
+        // Normalize to -180 to 180 range
+        return normalizeAngle(bearing)
+    }
+    
+    // Normalize angle to -180 to 180 degrees
+    private func normalizeAngle(_ angle: Float) -> Float {
+        var normalized = angle
+        while normalized > 180 {
+            normalized -= 360
+        }
+        while normalized < -180 {
+            normalized += 360
+        }
+        return normalized
+    }
 }
 
 // MARK: - UWB BLE Manager (Qorvo Protocol)
@@ -56,6 +141,13 @@ class BLEManager: NSObject, ObservableObject {
     private var configuration: NINearbyAccessoryConfiguration?
     private var accessoryDiscoveryToken: NIDiscoveryToken?
     
+    // MARK: - AR Session Properties (for enhanced positioning)
+    private var arSession: ARSession?
+    private var isARSessionEnabled = false
+    
+    // MARK: - Location Manager for Device Heading
+    private var locationManager: LocationManager?
+    
     // MARK: - Published Properties (Compatible with existing interface)
     @Published var isScanning = false
     @Published var isConnected = false
@@ -69,8 +161,13 @@ class BLEManager: NSObject, ObservableObject {
     @Published var receivedNumber: Int = 0 // For compatibility
     
     // Protocol state tracking
-    private var lastMessageSent: MessageId?
+    private var lastMessageSent: BLEMessageId?
     private var configurationAttempts = 0
+    private var isConverged = false
+    private var algorithmConvergenceStatus: String = "Not Started"
+    
+    // Device capabilities
+    private var supportsDirectionMeasurement: Bool = false
     
     // MARK: - Computed Properties for Compatibility
     var connectedPeripheralID: UUID? {
@@ -81,7 +178,35 @@ class BLEManager: NSObject, ObservableObject {
     override init() {
         super.init()
         centralManager = CBCentralManager(delegate: self, queue: nil)
+        
+        // Initialize location manager for device heading
+        locationManager = LocationManager()
+        
+        checkDeviceCapabilities()
         addDebugLog("🚀 UWB BLE Manager initialized (Qorvo Protocol)")
+    }
+    
+    private func checkDeviceCapabilities() {
+        let capabilities = NISession.deviceCapabilities
+        supportsDirectionMeasurement = capabilities.supportsDirectionMeasurement
+        
+        addDebugLog("📱 Device Capabilities:")
+        addDebugLog("   Direction support: \(supportsDirectionMeasurement)")
+        
+        // Check additional capabilities if available
+        if #available(iOS 17.0, *) {
+            let supportsExtended = capabilities.supportsExtendedDistanceMeasurement
+            addDebugLog("   Extended distance: \(supportsExtended)")
+        }
+        
+        // Device type detection
+        if !supportsDirectionMeasurement {
+            addDebugLog("⚠️ iPhone 14+ detected - direction requires convergence")
+            addDebugLog("   Will use horizontal angle when converged")
+        } else {
+            addDebugLog("✅ iPhone 11-13 detected - full direction support")
+            addDebugLog("   Will use 3D direction vectors directly")
+        }
     }
     
     private func updateProtocolState(_ newState: String) {
@@ -140,6 +265,12 @@ class BLEManager: NSObject, ObservableObject {
             uwbLocation.isValid = false
         }
         
+        // Don't destroy AR session - keep it running for next connection
+        // This prevents the 1-minute initialization gap
+        if isARSessionEnabled {
+            addDebugLog("📷 AR session kept running for next connection")
+        }
+        
         guard let peripheral = peripheral else { return }
         centralManager.cancelPeripheralConnection(peripheral)
         addDebugLog("🔌 Disconnecting from device")
@@ -173,7 +304,7 @@ class BLEManager: NSObject, ObservableObject {
         protocolState = "Initializing UWB"
         configurationAttempts += 1
         
-        // Create new NI session
+        // Create new NI session (don't link AR yet)
         niSession = NISession()
         niSession?.delegate = self
         addDebugLog("🎯 Created new NISession")
@@ -183,8 +314,72 @@ class BLEManager: NSObject, ObservableObject {
         sendMessage(.initialize)
     }
     
+    // MARK: - Enhanced AR Session Setup (following Qorvo best practices)
+    private func setupARSessionIfAvailable() {
+        guard ARWorldTrackingConfiguration.isSupported else {
+            addDebugLog("⚠️ AR World Tracking not supported on this device")
+            return
+        }
+        
+        // Only create AR session when we have a valid NI session and are about to start ranging
+        // This prevents the INVALID_AR_SESSION_DESCRIPTION error
+        if arSession == nil && niSession != nil {
+            arSession = ARSession()
+            addDebugLog("📷 AR Session created for enhanced positioning")
+            
+            let configuration = ARWorldTrackingConfiguration()
+            configuration.worldAlignment = .gravity  // Critical for direction accuracy
+            configuration.isCollaborationEnabled = false
+            configuration.userFaceTrackingEnabled = false
+            configuration.initialWorldMap = nil
+            configuration.isLightEstimationEnabled = true
+            
+            // Start AR session and wait for it to stabilize before linking
+            arSession?.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+            addDebugLog("📷 AR Session started, waiting to stabilize before linking...")
+            
+            // Wait for AR session to initialize properly before linking to NI
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.linkARSessionToNI()
+            }
+        }
+    }
+    
+    // MARK: - Link AR to NI Session (called when NI session is ready)
+    private func linkARSessionToNI() {
+        guard let arSession = arSession, let niSession = niSession else {
+            addDebugLog("⚠️ Cannot link - AR or NI session not available")
+            return
+        }
+        
+        // Only link if configuration is ready and we're not already linked
+        guard !isARSessionEnabled else {
+            addDebugLog("⚠️ AR Session already linked")
+            return
+        }
+        
+        // Link AR session to NI session
+        niSession.setARSession(arSession)
+        isARSessionEnabled = true
+        addDebugLog("✅ AR Session linked to NI Session")
+    }
+    
+    func enableAREnhancedPositioning(_ enable: Bool) {
+        if enable && !isARSessionEnabled {
+            setupARSessionIfAvailable()
+        } else if !enable && isARSessionEnabled {
+            arSession?.pause()
+            arSession = nil
+            isARSessionEnabled = false
+            addDebugLog("📷 AR Session disabled")
+            
+            // Note: We don't call setARSession(nil) since it's not supported
+            // The NI session will continue without AR enhancement
+        }
+    }
+    
     // MARK: - Message Handling
-    private func sendMessage(_ messageId: MessageId, data: Data? = nil) {
+    private func sendMessage(_ messageId: BLEMessageId, data: Data? = nil) {
         guard let characteristic = rxCharacteristic else {
             addDebugLog("❌ Cannot send - no RX characteristic")
             return
@@ -212,7 +407,7 @@ class BLEManager: NSObject, ObservableObject {
         let hexString = data.map { String(format: "%02X", $0) }.joined(separator: " ")
         addDebugLog("📥 RX: [\(hexString)]")
         
-        guard let messageId = MessageId(rawValue: data[0]) else {
+        guard let messageId = BLEMessageId(rawValue: data[0]) else {
             addDebugLog("❌ Unknown message ID: 0x\(String(format: "%02X", data[0]))")
             return
         }
@@ -237,6 +432,14 @@ class BLEManager: NSObject, ObservableObject {
             addDebugLog("🎉 Accessory confirmed UWB started!")
             isRanging = true
             
+            // Now that UWB is confirmed active, ensure AR is linked if available
+            if ARWorldTrackingConfiguration.isSupported && !isARSessionEnabled {
+                addDebugLog("📷 Linking AR session now that UWB is active")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.linkARSessionToNI()
+                }
+            }
+            
         case .accessoryUwbDidStop:
             protocolState = "UWB Stopped"
             addDebugLog("⏹️ Accessory stopped UWB")
@@ -252,8 +455,15 @@ class BLEManager: NSObject, ObservableObject {
         do {
             addDebugLog("🔧 Creating NINearbyAccessoryConfiguration...")
             configuration = try NINearbyAccessoryConfiguration(data: configData)
-            configuration?.isCameraAssistanceEnabled = true
+            // Only enable camera assistance if AR session will be available
+            configuration?.isCameraAssistanceEnabled = ARWorldTrackingConfiguration.isSupported
             accessoryDiscoveryToken = configuration?.accessoryDiscoveryToken
+            
+            if ARWorldTrackingConfiguration.isSupported {
+                addDebugLog("📷 Camera assistance will be enabled")
+            } else {
+                addDebugLog("⚠️ Camera assistance disabled - AR not supported")
+            }
             
             addDebugLog("✅ Configuration created successfully")
             
@@ -268,6 +478,9 @@ class BLEManager: NSObject, ObservableObject {
                 niSession = NISession()
                 niSession?.delegate = self
             }
+            
+            // Setup AR session now that we have a valid configuration
+            setupARSessionIfAvailable()
             
             addDebugLog("🏃 Running NISession with configuration...")
             niSession?.run(config)
@@ -288,7 +501,13 @@ class BLEManager: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Helper Methods
+    // MARK: - Helper Methods (Qorvo approach)
+    private func getDirectionFromHorizontalAngle(rad: Float) -> simd_float3 {
+        addDebugLog("🔄 Converting horizontal angle: \(String(format: "%.1f°", rad * 180 / .pi))")
+        // Qorvo reference implementation
+        return simd_float3(x: sin(rad), y: 0, z: cos(rad))
+    }
+    
     private func addDebugLog(_ message: String) {
         let timestamp = DateFormatter.timestamp.string(from: Date())
         let logMessage = "\(timestamp): \(message)"
@@ -300,6 +519,41 @@ class BLEManager: NSObject, ObservableObject {
         }
         print(logMessage)
     }
+    
+    // MARK: - Public Properties for Enhanced Access
+    var convergenceStatus: String {
+        return algorithmConvergenceStatus
+    }
+    
+    var enhancedUWBLocation: UWBLocation {
+        return uwbLocation
+    }
+    
+    var arEnhancedPositioning: Bool {
+        return isARSessionEnabled
+    }
+    
+    // MARK: - Enhanced Direction Access Methods
+    func getRelativeBearing() -> Float {
+        return uwbLocation.relativeBearing
+    }
+    
+    func getAbsoluteAzimuth() -> Float {
+        return uwbLocation.enhancedAzimuth
+    }
+    
+    func getDeviceHeading() -> Float {
+        return uwbLocation.deviceHeading
+    }
+}
+
+// MARK: - DateFormatter Extension
+extension DateFormatter {
+    static let timestamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        return formatter
+    }()
 }
 
 // MARK: - CBCentralManagerDelegate
@@ -362,6 +616,11 @@ extension BLEManager: CBCentralManagerDelegate {
         niSession?.invalidate()
         niSession = nil
         uwbLocation.isValid = false
+        
+        // Keep AR session running (Qorvo approach) - prevents re-initialization delays
+        if isARSessionEnabled {
+            addDebugLog("📷 AR session kept running for reconnection")
+        }
     }
 }
 
@@ -475,25 +734,91 @@ extension BLEManager: NISessionDelegate {
     func session(_ session: NISession, didUpdate nearbyObjects: [NINearbyObject]) {
         guard let object = nearbyObjects.first else { return }
         
+        // ALWAYS log raw data for debugging
+        let rawDistance = object.distance?.description ?? "nil"
+        let rawDirection = object.direction?.debugDescription ?? "nil"
+        let rawHorizontalAngle = object.horizontalAngle?.description ?? "nil"
+        let rawVerticalEstimate = String(describing: object.verticalDirectionEstimate)
+        
+        addDebugLog("🔍 RAW DATA - Distance: \(rawDistance), Direction: \(rawDirection), HAngle: \(rawHorizontalAngle), VEstimate: \(rawVerticalEstimate)")
+        
         DispatchQueue.main.async {
-            var updated = false
-            
+            // Always update distance
             if let distance = object.distance {
                 self.uwbLocation.distance = distance
-                updated = true
+                self.addDebugLog("📏 Distance: \(String(format: "%.3f", distance))m")
             }
             
+            // Update device capabilities and heading in location
+            self.uwbLocation.supportsDirectionMeasurement = self.supportsDirectionMeasurement
+            
+            // Update device heading from location manager
+            if let locationManager = self.locationManager {
+                self.uwbLocation.deviceHeading = Float(locationManager.deviceHeading)
+            }
+            
+            // Handle direction based on device capabilities and convergence
             if let direction = object.direction {
+                // iPhone 11-13 with full direction support
                 self.uwbLocation.direction = direction
-                self.uwbLocation.azimuth = atan2(direction.x, direction.z) * 180 / .pi
-                self.uwbLocation.elevation = asin(direction.y) * 180 / .pi
-                updated = true
+                let oldAzimuth = self.uwbLocation.azimuth
+                let oldElevation = self.uwbLocation.elevation
+                
+                self.uwbLocation.azimuth = self.uwbLocation.enhancedAzimuth
+                self.uwbLocation.elevation = self.uwbLocation.enhancedElevation
+                self.uwbLocation.noUpdate = false
+                
+                self.addDebugLog("📍 3D Direction: x=\(String(format: "%.6f", direction.x)), y=\(String(format: "%.6f", direction.y)), z=\(String(format: "%.6f", direction.z))")
+                self.addDebugLog("📍 Direction Az: \(String(format: "%.1f", self.uwbLocation.azimuth))°, El: \(String(format: "%.1f", self.uwbLocation.elevation))° (was Az: \(String(format: "%.1f", oldAzimuth))°)")
+                
+            } else if self.isConverged, let horizontalAngle = object.horizontalAngle {
+                // iPhone 14+ fallback when converged (Qorvo approach)
+                self.uwbLocation.horizontalAngle = horizontalAngle
+                
+                // Use Qorvo's direction conversion approach
+                let syntheticDirection = self.getDirectionFromHorizontalAngle(rad: horizontalAngle)
+                self.uwbLocation.direction = syntheticDirection
+                
+                // Calculate azimuth and elevation using enhanced methods
+                self.uwbLocation.azimuth = self.uwbLocation.enhancedAzimuth
+                
+                // Get vertical estimate (Qorvo approach)
+                let verticalEstimate = object.verticalDirectionEstimate
+                self.uwbLocation.verticalDirectionEstimate = verticalEstimate.rawValue
+                self.uwbLocation.elevation = Float(verticalEstimate.rawValue)
+                
+                self.uwbLocation.noUpdate = false
+                
+                self.addDebugLog("📍 Converged Direction: HAngle: \(String(format: "%.3f", horizontalAngle))rad = \(String(format: "%.1f", horizontalAngle * 180 / .pi))°, VEst: \(verticalEstimate)")
+                
+            } else {
+                // No direction available
+                self.uwbLocation.noUpdate = true
+                
+                if !self.isConverged {
+                    if self.uwbLocation.distance < 1.0 {
+                        self.addDebugLog("📱 Move away from target - too close for direction")
+                    } else {
+                        self.addDebugLog("🚶 Move device in figure-8 patterns for convergence")
+                    }
+                } else {
+                    self.addDebugLog("💡 Need better lighting conditions for direction")
+                }
             }
             
-            if updated {
+            // Always update timestamp and validity if we have any data
+            if !self.uwbLocation.noUpdate || self.uwbLocation.distance > 0 {
                 self.uwbLocation.timestamp = Date()
                 self.uwbLocation.isValid = true
-                self.addDebugLog("📍 D: \(String(format: "%.2f", self.uwbLocation.distance))m, Az: \(String(format: "%.0f", self.uwbLocation.azimuth))°")
+                self.uwbLocation.isConverged = self.isConverged
+                
+                let azimuthDeg = self.uwbLocation.azimuth
+                let elevationDeg = self.uwbLocation.elevation
+                let relativeBearing = self.uwbLocation.relativeBearing
+                let deviceHead = self.uwbLocation.deviceHeading
+                
+                self.addDebugLog("📍 Final: D: \(String(format: "%.2f", self.uwbLocation.distance))m, Az: \(String(format: "%.1f", azimuthDeg))°, El: \(String(format: "%.1f", elevationDeg))°")
+                self.addDebugLog("🧭 Device: \(String(format: "%.1f", deviceHead))° → Target: \(String(format: "%.1f", azimuthDeg))° (Relative: \(String(format: "%.1f", relativeBearing))°)")
             }
         }
     }
@@ -510,8 +835,8 @@ extension BLEManager: NISessionDelegate {
     
     func sessionWasSuspended(_ session: NISession) {
         protocolState = "Session Suspended"
-        addDebugLog("⏸️ Session suspended")
-        sendMessage(.stop)
+        addDebugLog("⏸️ Session suspended - app backgrounded or camera permission issue")
+        // Don't automatically stop - let it resume naturally
     }
     
     func sessionSuspensionEnded(_ session: NISession) {
@@ -520,11 +845,62 @@ extension BLEManager: NISessionDelegate {
         sendMessage(.initialize)
     }
     
+    func session(_ session: NISession, didUpdateAlgorithmConvergence convergence: NIAlgorithmConvergence, for object: NINearbyObject?) {
+        guard object != nil else { return }
+        
+        DispatchQueue.main.async {
+            switch convergence.status {
+            case .converged:
+                self.isConverged = true
+                self.algorithmConvergenceStatus = "Converged"
+                self.addDebugLog("✅ Algorithm converged - accurate direction available")
+                self.protocolState = "UWB Converged"
+                
+                // Update UWB location with device capabilities
+                self.uwbLocation.supportsDirectionMeasurement = self.supportsDirectionMeasurement
+                
+            case .notConverged(let reasons):
+                self.isConverged = false
+                
+                if reasons.contains(.insufficientLighting) {
+                    self.algorithmConvergenceStatus = "Need Better Lighting"
+                    self.addDebugLog("💡 Move to brighter area for convergence")
+                } else if reasons.contains(.insufficientMovement) {
+                    self.algorithmConvergenceStatus = "Need Movement"
+                    self.addDebugLog("🚶 Move device in slow figure-8 patterns")
+                } else {
+                    self.algorithmConvergenceStatus = "Converging..."
+                    self.addDebugLog("🔄 Keep moving device slowly for convergence")
+                }
+                
+                // Always update device capabilities
+                self.uwbLocation.supportsDirectionMeasurement = self.supportsDirectionMeasurement
+                
+            @unknown default:
+                self.algorithmConvergenceStatus = "Unknown"
+                self.addDebugLog("❓ Unknown convergence status")
+            }
+        }
+    }
+    
     func session(_ session: NISession, didInvalidateWith error: Error) {
         protocolState = "Session Invalid"
         addDebugLog("❌ Session invalidated: \(error)")
         isRanging = false
+        isConverged = false
         uwbLocation.isValid = false
+        
+        // Handle specific error cases
+        if let niError = error as? NIError {
+            switch niError.code {
+            case .userDidNotAllow:
+                addDebugLog("🚫 User denied Nearby Interaction access")
+            case .invalidConfiguration:
+                addDebugLog("⚙️ Invalid configuration - check accessory setup")
+            default:
+                addDebugLog("❌ NI Error: \(niError.localizedDescription)")
+            }
+        }
     }
 }
 
