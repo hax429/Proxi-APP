@@ -429,6 +429,9 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Proxi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This app needs Bluetooth";
+				INFOPLIST_KEY_NSCameraUsageDescription = "This app uses the camera to improve Ultra Wideband positioning accuracy and provide better direction finding.";
+				INFOPLIST_KEY_NSNearbyInteractionAllowOnceUsageDescription = "Allow UWB access to enable precise positioning with your device.";
+				INFOPLIST_KEY_NSNearbyInteractionUsageDescription = "This app uses Ultra Wideband to provide precise distance and direction measurements to nearby accessories.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -473,6 +476,9 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Proxi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This app needs Bluetooth";
+				INFOPLIST_KEY_NSCameraUsageDescription = "This app uses the camera to improve Ultra Wideband positioning accuracy and provide better direction finding.";
+				INFOPLIST_KEY_NSNearbyInteractionAllowOnceUsageDescription = "Allow UWB access to enable precise positioning with your device.";
+				INFOPLIST_KEY_NSNearbyInteractionUsageDescription = "This app uses Ultra Wideband to provide precise distance and direction measurements to nearby accessories.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
