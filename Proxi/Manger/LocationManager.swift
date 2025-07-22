@@ -9,8 +9,6 @@ import Foundation
 import SwiftUI
 import CoreLocation
 
-
-
 // MARK: - Location Manager for Real Device Heading
 class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let locationManager = CLLocationManager()

@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 struct TopBarView: View {
     @Binding var selectedTab: Int
@@ -67,7 +68,7 @@ struct TopBarView: View {
                         if let data = try? await newItem.loadTransferable(type: Data.self),
                            let image = UIImage(data: data) {
                             DispatchQueue.main.async {
-                                _ = userManager.saveProfileImage(image)
+                                _ = userManager.setProfileImage(image)
                             }
                         }
                     }

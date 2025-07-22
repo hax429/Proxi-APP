@@ -2,94 +2,139 @@
 //  UserManager.swift
 //  Proxi
 //
-//  Created by Gabriel Wang on 7/20/25.
+//  Created by Claude on 7/21/25.
 //
-import SwiftUI
-import PhotosUI
-import Foundation
 
-// MARK: - User Model
-class User: ObservableObject, Codable {
-    @Published var name: String
-    @Published var profileImagePath: String?
+import Foundation
+import SwiftUI
+import UIKit
+
+// MARK: - User Profile Model
+struct UserProfile: Codable {
+    let id: String
+    let name: String
+    let email: String?
+    let createdDate: Date
+    var hasProfileImage: Bool
     
-    init(name: String = "User", profileImagePath: String? = nil) {
+    init(id: String = UUID().uuidString, name: String, email: String? = nil) {
+        self.id = id
         self.name = name
-        self.profileImagePath = profileImagePath
-    }
-    
-    // Codable conformance
-    enum CodingKeys: String, CodingKey {
-        case name, profileImagePath
-    }
-    
-    required init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        name = try container.decode(String.self, forKey: .name)
-        profileImagePath = try container.decodeIfPresent(String.self, forKey: .profileImagePath)
-    }
-    
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(name, forKey: .name)
-        try container.encode(profileImagePath, forKey: .profileImagePath)
+        self.email = email
+        self.createdDate = Date()
+        self.hasProfileImage = false
     }
 }
 
 // MARK: - User Manager
 class UserManager: ObservableObject {
-    @Published var currentUser: User
-    private let userDefaultsKey = "SavedUser"
-    private let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    @Published var userProfile: UserProfile?
+    @Published var isSetup: Bool = false
+    
+    private let userDefaults = UserDefaults.standard
+    private let profileKey = "user_profile"
+    private let profileImageKey = "user_profile_image"
     
     init() {
-        // Load user from UserDefaults
-        if let savedUserData = UserDefaults.standard.data(forKey: userDefaultsKey),
-           let savedUser = try? JSONDecoder().decode(User.self, from: savedUserData) {
-            self.currentUser = savedUser
-        } else {
-            self.currentUser = User()
-        }
+        loadUserProfile()
     }
     
-    func saveUser() {
-        if let encoded = try? JSONEncoder().encode(currentUser) {
-            UserDefaults.standard.set(encoded, forKey: userDefaultsKey)
-        }
+    // MARK: - Profile Management
+    func createProfile(name: String, email: String? = nil) {
+        let profile = UserProfile(name: name, email: email)
+        userProfile = profile
+        isSetup = true
+        saveUserProfile()
     }
     
-    func saveProfileImage(_ image: UIImage) -> String? {
-        guard let imageData = image.jpegData(compressionQuality: 0.8) else { return nil }
+    func updateProfile(name: String? = nil, email: String? = nil) {
+        guard var profile = userProfile else { return }
         
-        let filename = "profile_\(UUID().uuidString).jpg"
-        let imageURL = documentsPath.appendingPathComponent(filename)
+        if let name = name {
+            profile = UserProfile(
+                id: profile.id,
+                name: name,
+                email: email ?? profile.email
+            )
+        }
         
-        do {
-            try imageData.write(to: imageURL)
-            
-            // Delete old profile image if it exists
-            if let oldPath = currentUser.profileImagePath {
-                let oldURL = documentsPath.appendingPathComponent(oldPath)
-                try? FileManager.default.removeItem(at: oldURL)
-            }
-            
-            currentUser.profileImagePath = filename
-            saveUser()
-            return filename
-        } catch {
-            print("Error saving image: \(error)")
-            return nil
+        userProfile = profile
+        saveUserProfile()
+    }
+    
+    // MARK: - Profile Image Management
+    func setProfileImage(_ image: UIImage) {
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else { return }
+        userDefaults.set(imageData, forKey: profileImageKey)
+        
+        if var profile = userProfile {
+            profile.hasProfileImage = true
+            userProfile = profile
+            saveUserProfile()
         }
     }
     
     func getProfileImage() -> UIImage? {
-        guard let imagePath = currentUser.profileImagePath else { return nil }
-        let imageURL = documentsPath.appendingPathComponent(imagePath)
-        return UIImage(contentsOfFile: imageURL.path)
+        guard let imageData = userDefaults.data(forKey: profileImageKey) else { return nil }
+        return UIImage(data: imageData)
     }
     
-    func updateUserName(_ name: String) {
-        currentUser.name = name
-        saveUser()
+    func removeProfileImage() {
+        userDefaults.removeObject(forKey: profileImageKey)
+        
+        if var profile = userProfile {
+            profile.hasProfileImage = false
+            userProfile = profile
+            saveUserProfile()
+        }
+    }
+    
+    // MARK: - User Preferences
+    func getUserName() -> String {
+        return userProfile?.name ?? "User"
+    }
+    
+    func getUserInitials() -> String {
+        let name = getUserName()
+        let components = name.components(separatedBy: " ")
+        if components.count > 1 {
+            return String(components[0].prefix(1) + components[1].prefix(1)).uppercased()
+        } else {
+            return String(name.prefix(2)).uppercased()
+        }
+    }
+    
+    // MARK: - Persistence
+    private func saveUserProfile() {
+        if let profile = userProfile,
+           let encoded = try? JSONEncoder().encode(profile) {
+            userDefaults.set(encoded, forKey: profileKey)
+        }
+    }
+    
+    private func loadUserProfile() {
+        if let data = userDefaults.data(forKey: profileKey),
+           let decoded = try? JSONDecoder().decode(UserProfile.self, from: data) {
+            userProfile = decoded
+            isSetup = true
+        } else {
+            // Create default user for development
+            createDefaultUser()
+        }
+    }
+    
+    private func createDefaultUser() {
+        let defaultProfile = UserProfile(name: "Proxi User", email: nil)
+        userProfile = defaultProfile
+        isSetup = true
+        saveUserProfile()
+    }
+    
+    // MARK: - Reset/Logout
+    func resetUserData() {
+        userDefaults.removeObject(forKey: profileKey)
+        userDefaults.removeObject(forKey: profileImageKey)
+        userProfile = nil
+        isSetup = false
     }
 }

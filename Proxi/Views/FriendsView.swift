@@ -350,7 +350,7 @@ struct FriendsView: View {
         VStack(spacing: 8) {
             ForEach(friendsManager.nearbyProxis) { proxi in
                 NearbyProxiRowView(proxi: proxi, onSendRequest: {
-                    friendsManager.sendFriendRequest(to: proxi.id)
+                    friendsManager.sendFriendRequest(to: proxi)
                 })
             }
         }
@@ -369,7 +369,7 @@ struct FriendsView_Previews: PreviewProvider {
 
 // MARK: - Supporting Views
 struct FriendsListRowView: View {
-    let friend: FriendProfile
+    let friend: Friend
     var showLastActive: Bool = true
     
     var body: some View {
@@ -386,7 +386,7 @@ struct FriendsListRowView: View {
                     )
                     .frame(width: 50, height: 50)
                 
-                Text(friend.avatar)
+                Text(String(friend.name.prefix(1)))
                     .font(.headline)
                     .fontWeight(.bold)
                     .foregroundColor(.white)

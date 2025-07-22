@@ -4,6 +4,7 @@
 //
 //  Created by Gabriel Wang on 7/20/25.
 //
+
 import Foundation
 import SwiftUI
 import CoreBluetooth
@@ -12,8 +13,8 @@ import ARKit
 import simd
 import CoreLocation
 
-// MARK: - Settings Helper (temporary)
-class Settings {
+// MARK: - BLE Settings Helper (temporary)
+class BLESettings {
     var isDirectionEnable: Bool {
         // Check device capabilities - iPhone 14+ supports directional features
         return true // You can implement actual device checking here
@@ -193,12 +194,6 @@ class BLEManager: NSObject, ObservableObject {
         addDebugLog("📱 Device Capabilities:")
         addDebugLog("   Direction support: \(supportsDirectionMeasurement)")
         
-        // Check additional capabilities if available
-        if #available(iOS 17.0, *) {
-            let supportsExtended = capabilities.supportsExtendedDistanceMeasurement
-            addDebugLog("   Extended distance: \(supportsExtended)")
-        }
-        
         // Device type detection
         if !supportsDirectionMeasurement {
             addDebugLog("⚠️ iPhone 14+ detected - direction requires convergence")
@@ -286,17 +281,29 @@ class BLEManager: NSObject, ObservableObject {
             return
         }
         
-        addDebugLog("🔄 Retrying UWB initialization...")
-        configurationAttempts = 0
+        addDebugLog("🔄 Retrying UWB initialization (attempt \(configurationAttempts + 1))...")
         
-        // Clean up existing session
-        niSession?.invalidate()
-        niSession = nil
+        // Clean up existing session completely
+        if let niSession = niSession {
+            niSession.invalidate()
+            self.niSession = nil
+        }
+        
+        // Reset AR session if it was problematic
+        if isARSessionEnabled {
+            isARSessionEnabled = false
+            arSession?.pause()
+            arSession = nil
+            addDebugLog("📷 AR session reset for retry")
+        }
+        
         isRanging = false
         protocolState = "Retrying"
         
-        // Start fresh
-        startUWBProtocol()
+        // Wait a moment for cleanup to complete
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.startUWBProtocol()
+        }
     }
     
     // MARK: - UWB Protocol Methods
@@ -304,10 +311,15 @@ class BLEManager: NSObject, ObservableObject {
         protocolState = "Initializing UWB"
         configurationAttempts += 1
         
-        // Create new NI session (don't link AR yet)
+        // Create new NI session
         niSession = NISession()
         niSession?.delegate = self
         addDebugLog("🎯 Created new NISession")
+        
+        // Start preparing AR session early to allow stabilization time
+        if ARWorldTrackingConfiguration.isSupported {
+            setupARSessionIfAvailable()
+        }
         
         // Send initialize command
         addDebugLog("📤 Sending INITIALIZE (0x0A) to start protocol...")
@@ -321,9 +333,9 @@ class BLEManager: NSObject, ObservableObject {
             return
         }
         
-        // Only create AR session when we have a valid NI session and are about to start ranging
+        // Create AR session early but don't link until UWB is fully active
         // This prevents the INVALID_AR_SESSION_DESCRIPTION error
-        if arSession == nil && niSession != nil {
+        if arSession == nil {
             arSession = ARSession()
             addDebugLog("📷 AR Session created for enhanced positioning")
             
@@ -334,14 +346,9 @@ class BLEManager: NSObject, ObservableObject {
             configuration.initialWorldMap = nil
             configuration.isLightEstimationEnabled = true
             
-            // Start AR session and wait for it to stabilize before linking
+            // Start AR session immediately to begin stabilization
             arSession?.run(configuration, options: [.resetTracking, .removeExistingAnchors])
-            addDebugLog("📷 AR Session started, waiting to stabilize before linking...")
-            
-            // Wait for AR session to initialize properly before linking to NI
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.linkARSessionToNI()
-            }
+            addDebugLog("📷 AR Session started - will link after UWB confirmation...")
         }
     }
     
@@ -353,15 +360,27 @@ class BLEManager: NSObject, ObservableObject {
         }
         
         // Only link if configuration is ready and we're not already linked
-        guard !isARSessionEnabled else {
-            addDebugLog("⚠️ AR Session already linked")
+        guard !isARSessionEnabled && isRanging else {
+            if isARSessionEnabled {
+                addDebugLog("⚠️ AR Session already linked")
+            } else if !isRanging {
+                addDebugLog("⚠️ Cannot link AR - UWB not yet active")
+            }
             return
         }
         
-        // Link AR session to NI session
-        niSession.setARSession(arSession)
-        isARSessionEnabled = true
-        addDebugLog("✅ AR Session linked to NI Session")
+        // Ensure AR session has had time to stabilize
+        addDebugLog("📷 Linking AR session to stabilized NI session...")
+        
+        do {
+            // Link AR session to NI session with error handling
+            niSession.setARSession(arSession)
+            isARSessionEnabled = true
+            addDebugLog("✅ AR Session successfully linked to NI Session")
+        } catch {
+            addDebugLog("❌ Failed to link AR session: \(error.localizedDescription)")
+            // Continue without AR enhancement
+        }
     }
     
     func enableAREnhancedPositioning(_ enable: Bool) {
@@ -432,12 +451,15 @@ class BLEManager: NSObject, ObservableObject {
             addDebugLog("🎉 Accessory confirmed UWB started!")
             isRanging = true
             
-            // Now that UWB is confirmed active, ensure AR is linked if available
-            if ARWorldTrackingConfiguration.isSupported && !isARSessionEnabled {
-                addDebugLog("📷 Linking AR session now that UWB is active")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            // Now that UWB is confirmed active, link AR session if available and ready
+            if ARWorldTrackingConfiguration.isSupported && !isARSessionEnabled && arSession != nil {
+                addDebugLog("📷 UWB active - linking prepared AR session...")
+                // Give a moment for any final AR stabilization
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                     self.linkARSessionToNI()
                 }
+            } else if ARWorldTrackingConfiguration.isSupported && arSession == nil {
+                addDebugLog("⚠️ AR session not ready - continuing with UWB only")
             }
             
         case .accessoryUwbDidStop:
@@ -478,9 +500,6 @@ class BLEManager: NSObject, ObservableObject {
                 niSession = NISession()
                 niSession?.delegate = self
             }
-            
-            // Setup AR session now that we have a valid configuration
-            setupARSessionIfAvailable()
             
             addDebugLog("🏃 Running NISession with configuration...")
             niSession?.run(config)
@@ -621,6 +640,8 @@ extension BLEManager: CBCentralManagerDelegate {
         if isARSessionEnabled {
             addDebugLog("📷 AR session kept running for reconnection")
         }
+        arSession = nil
+        isARSessionEnabled = false
     }
 }
 
@@ -895,12 +916,40 @@ extension BLEManager: NISessionDelegate {
             switch niError.code {
             case .userDidNotAllow:
                 addDebugLog("🚫 User denied Nearby Interaction access")
+                addDebugLog("💡 Enable location and camera permissions in Settings")
             case .invalidConfiguration:
-                addDebugLog("⚙️ Invalid configuration - check accessory setup")
+                addDebugLog("⚙️ Invalid configuration - retrying initialization")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    if self.isConnected {
+                        self.retryUWBInitialization()
+                    }
+                }
+            case .resourceUsageTimeout:
+                addDebugLog("⏰ Resource timeout - will retry on reconnection")
+            case .activeSessionsLimitExceeded:
+                addDebugLog("📱 Too many active NI sessions - cleanup and retry")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.retryUWBInitialization()
+                }
             default:
-                addDebugLog("❌ NI Error: \(niError.localizedDescription)")
+                addDebugLog("❌ NI Error (\(niError.code.rawValue)): \(niError.localizedDescription)")
+                
+                // For AR session errors, retry without AR
+                if niError.localizedDescription.contains("AR") || niError.code.rawValue == -5883 {
+                    addDebugLog("📷 AR session error detected - retrying UWB without AR...")
+                    isARSessionEnabled = false
+                    arSession?.pause()
+                    arSession = nil
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        if self.isConnected {
+                            self.retryUWBInitialization()
+                        }
+                    }
+                }
             }
+        } else {
+            addDebugLog("❌ Unknown session error: \(error.localizedDescription)")
         }
     }
 }
-

@@ -124,7 +124,7 @@ struct ProfileSettingsView: View {
                             if let data = try? await newItem.loadTransferable(type: Data.self),
                                let image = UIImage(data: data) {
                                 DispatchQueue.main.async {
-                                    _ = userManager.saveProfileImage(image)
+                                    _ = userManager.setProfileImage(image)
                                 }
                             }
                         }
@@ -147,25 +147,25 @@ struct ProfileSettingsView: View {
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                         
                         Button("Save") {
-                            userManager.updateUserName(tempName)
+                            userManager.updateProfile(name: tempName)
                             editingName = false
                         }
                         .disabled(tempName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         
                         Button("Cancel") {
-                            tempName = userManager.currentUser.name
+                            tempName = userManager.userProfile?.name ?? ""
                             editingName = false
                         }
                     }
                 } else {
                     HStack {
-                        Text(userManager.currentUser.name)
+                        Text(userManager.userProfile?.name ?? "")
                             .font(.body)
                         
                         Spacer()
                         
                         Button("Edit") {
-                            tempName = userManager.currentUser.name
+                            tempName = userManager.userProfile?.name ?? ""
                             editingName = true
                         }
                     }
@@ -177,7 +177,7 @@ struct ProfileSettingsView: View {
         .padding()
         .navigationTitle("Profile Settings")
         .onAppear {
-            tempName = userManager.currentUser.name
+            tempName = userManager.userProfile?.name ?? ""
         }
     }
 }
@@ -374,7 +374,7 @@ extension SettingsView {
                 
                 // Data Display Card
                 //Todo: Only enable in dev setting
-                if isDeveloperModeEnabled && bleManager.isConnected {
+                if isDeveloperModeEnabled && qorvoConnectionStatus.isConnected {
                     dataDisplayCard
                 }
                 
@@ -392,10 +392,10 @@ extension SettingsView {
             // Status Indicator
             ZStack {
                 Circle()
-                    .fill(bleManager.isConnected ? Color.green : Color.red)
+                    .fill(qorvoConnectionStatus.isConnected ? Color.green : Color.red)
                     .frame(width: 16, height: 16)
                 
-                if bleManager.isConnected {
+                if qorvoConnectionStatus.isConnected {
                     Circle()
                         .stroke(Color.green.opacity(0.3), lineWidth: 2)
                         .frame(width: 24, height: 24)
@@ -405,12 +405,12 @@ extension SettingsView {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(bleManager.connectionStatus)
+                Text(qorvoConnectionStatus.statusText)
                     .font(.headline)
                     .foregroundColor(.white)
                 
-                if bleManager.isConnected {
-                    Text("Connected to Arduino")
+                if qorvoConnectionStatus.isConnected {
+                    Text("Connected to \(qorvoConnectionStatus.deviceName)")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.7))
                 } else {
@@ -422,28 +422,15 @@ extension SettingsView {
             
             Spacer()
             
-            if bleManager.isConnected && bleManager.rssi != 0 {
+            if qorvoConnectionStatus.isConnected && qorvoConnectionStatus.deviceCount > 0 {
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("Signal Strength")
+                    Text("Active Devices")
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.6))
-                    if isDeveloperModeEnabled{
-                        Text("\(bleManager.rssi) dBm")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundColor(signalStrengthColor)
-                    }
-                    else {
-                        if bleManager.rssi >= -50{
-                            Text("Strong").foregroundColor(signalStrengthColor)
-                        }
-                        else if bleManager.rssi >= -70{
-                            Text("Poor").foregroundColor(signalStrengthColor)
-                        }
-                        else{
-                            Text("Disconnected").foregroundColor(signalStrengthColor)
-                        }
-                    }
+                    Text("\(qorvoConnectionStatus.deviceCount)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.green)
                 }
             }
         }
@@ -456,6 +443,18 @@ extension SettingsView {
         )
     }
     
+    private var qorvoConnectionStatus: (isConnected: Bool, statusText: String, deviceName: String, deviceCount: Int) {
+        let connectedDevices = qorvoDevices.compactMap { $0 }.filter { $0.blePeripheralStatus == statusRanging }
+        let isConnected = !connectedDevices.isEmpty
+        
+        if isConnected {
+            let deviceName = connectedDevices.first?.blePeripheralName ?? "Unknown"
+            return (true, "Connected", deviceName, connectedDevices.count)
+        } else {
+            return (false, "Disconnected", "", 0)
+        }
+    }
+    
     var signalStrengthColor: Color {
         if bleManager.rssi >= -50 { return .green }
         else if bleManager.rssi >= -70 { return .yellow }
@@ -465,34 +464,59 @@ extension SettingsView {
     var dataDisplayCard: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("Live Data")
+                Text("UWB Data")
                     .font(.headline)
                     .foregroundColor(.white)
                 Spacer()
-                Image(systemName: "antenna.radiowaves.left.and.right")
+                Image(systemName: "wave.3.right")
                     .foregroundColor(.blue)
             }
             
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Received Value")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                    Text("\(bleManager.receivedNumber)")
-                        .font(.system(size: 36, weight: .bold, design: .monospaced))
-                        .foregroundColor(.blue)
+            if let selectedDevice = qorvoDevices.compactMap({ $0 }).first(where: { $0.blePeripheralStatus == statusRanging }) {
+                VStack(spacing: 8) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Distance")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                            if let distance = selectedDevice.uwbLocation?.distance {
+                                Text(String(format: "%.3f m", distance))
+                                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.green)
+                            } else {
+                                Text("--")
+                                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text("Status")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(selectedDevice.blePeripheralStatus ?? "Unknown")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    
+                    if let direction = selectedDevice.uwbLocation?.direction {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Direction (x,y,z)")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                            Text("(\(String(format: "%.3f", direction.x)), \(String(format: "%.3f", direction.y)), \(String(format: "%.3f", direction.z)))")
+                                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                                .foregroundColor(.blue)
+                        }
+                    }
                 }
-                
-                Spacer()
-                
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("Last Updated")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                    Text(Date().formatted(date: .omitted, time: .shortened))
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                }
+            } else {
+                Text("No ranging data available")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.7))
             }
         }
         .padding()
@@ -511,7 +535,7 @@ extension SettingsView {
                     .font(.headline)
                     .foregroundColor(.white)
                 Spacer()
-                Text("\(bleManager.discoveredPeripherals.count)")
+                Text("\(qorvoDevices.compactMap { $0 }.count)")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.6))
                     .padding(.horizontal, 8)
@@ -520,7 +544,7 @@ extension SettingsView {
                     .cornerRadius(8)
             }
             
-            if bleManager.discoveredPeripherals.isEmpty {
+            if qorvoDevices.compactMap({ $0 }).isEmpty {
                 emptyDeviceListView
             } else {
                 deviceList
@@ -555,13 +579,15 @@ extension SettingsView {
     
     var deviceList: some View {
         VStack(spacing: 8) {
-            ForEach(bleManager.discoveredPeripherals, id: \.identifier) { peripheral in
-                DeviceRowView(
-                    peripheral: peripheral,
-                    isConnected: bleManager.isConnected,
-                    connectedPeripheralID: bleManager.connectedPeripheralID,
+            ForEach(qorvoDevices.compactMap { $0 }, id: \.bleUniqueID) { qorvoDevice in
+                QorvoDeviceRowView(
+                    qorvoDevice: qorvoDevice,
                     onConnect: {
-                        bleManager.connect(to: peripheral)
+                        // Use QorvoDemoViewController connection logic via parent
+                        connectToAccessory(qorvoDevice.bleUniqueID)
+                    },
+                    onDisconnect: {
+                        disconnectFromAccessory(qorvoDevice.bleUniqueID)
                     },
                     isDeveloperMode: isDeveloperModeEnabled
                 )
@@ -570,50 +596,54 @@ extension SettingsView {
     }
     
     var controlButtonsCard: some View {
-        HStack(spacing: 12) {
+        VStack(spacing: 12) {
             // Scan Button
             Button(action: {
-                if bleManager.isScanning {
-                    bleManager.stopScanning()
-                } else {
-                    bleManager.startScanning()
-                }
+                startScanning()
             }) {
                 HStack(spacing: 8) {
-                    Image(systemName: bleManager.isScanning ? "stop.circle.fill" : "magnifyingglass")
+                    Image(systemName: isScanning ? "stop.circle.fill" : "magnifyingglass.circle.fill")
                         .font(.system(size: 16, weight: .semibold))
-                    Text(bleManager.isScanning ? "Stop" : "Scan")
+                    Text(isScanning ? "Stop Scanning" : "Start Scanning")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
-                .background(
-                    Group {
-                        if bleManager.isScanning {
-                            Color.red
-                        } else {
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color.blue, Color.purple]),
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        }
-                    }
-                )
+                .background(isScanning ? Color.orange : Color.blue)
                 .cornerRadius(12)
             }
             
-            // Disconnect Button
-            if bleManager.isConnected {
+            // Connect to discovered devices
+            if hasDiscoveredDevices && !isScanning {
                 Button(action: {
-                    bleManager.disconnect()
+                    connectToFirstDiscoveredDevice()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "link.circle.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Connect to Device")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.green)
+                    .cornerRadius(12)
+                }
+            }
+            
+            // Disconnect button for connected devices
+            if hasConnectedDevices {
+                Button(action: {
+                    disconnectAllDevices()
                 }) {
                     HStack(spacing: 8) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 16, weight: .semibold))
-                        Text("Disconnect")
+                        Text("Disconnect All")
                             .font(.subheadline)
                             .fontWeight(.semibold)
                     }
@@ -623,6 +653,26 @@ extension SettingsView {
                     .background(Color.red)
                     .cornerRadius(12)
                 }
+            }
+            
+            // Status text
+            Text(scanningStatusText)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+        }
+    }
+    
+    private var hasConnectedDevices: Bool {
+        qorvoDevices.compactMap { $0 }.contains { device in
+            device.blePeripheralStatus == statusRanging || device.blePeripheralStatus == statusConnected
+        }
+    }
+    
+    private func disconnectAllDevices() {
+        qorvoDevices.compactMap { $0 }.forEach { device in
+            if device.blePeripheralStatus == statusRanging || device.blePeripheralStatus == statusConnected {
+                disconnectFromAccessory(device.bleUniqueID)
             }
         }
     }

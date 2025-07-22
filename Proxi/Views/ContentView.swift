@@ -11,6 +11,8 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State var isSidebarOpen = false
     @EnvironmentObject var bleManager: BLEManager
+    @EnvironmentObject var friendsManager: FriendsManager
+    @EnvironmentObject var userManager: UserManager
     
     var body: some View {
         ZStack {
@@ -27,14 +29,14 @@ struct ContentView: View {
                         }
                     }
                     .tag(0)
-                CompassView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
+                QorvoView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
                     .tabItem {
                         VStack {
                             Spacer().frame(height: 20)
-                            Image(systemName: "location")
+                            Image(systemName: "location.viewfinder")
                                 .renderingMode(.template)
                                 .foregroundColor(selectedTab == 1 ? Color.white : Color.white.opacity(1))
-                            Text("Compass")
+                            Text("UWB Tracker")
                                 .foregroundColor(selectedTab == 1 ? Color.white : Color.white.opacity(1))
                         }
                     }
