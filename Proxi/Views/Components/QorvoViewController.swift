@@ -11,205 +11,168 @@ import NearbyInteraction
 import ARKit
 import RealityKit
 import CoreBluetooth
+import CoreLocation
 import simd
 
-// MARK: - SwiftUI UWB Tracker View
+// MARK: - Modern UIKit-based QorvoView
 struct QorvoView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var bleManager: BLEManager
     @EnvironmentObject var friendsManager: FriendsManager
     @Binding var isSidebarOpen: Bool
-    @State private var selectedDevice: qorvoDevice?
-    @State private var rotationAngle: Double = 0
-    @State private var elevation: Int = 0
+    @State private var selectedDeviceIndex: Int = 0
+    @State private var connectedDevicesList: [qorvoDevice] = []
     @State private var showDebugWindow = false
     @State private var tapCount = 0
     
+    // Direction and location tracking
+    @State private var rotationAngle: Double = 0
+    @State private var elevation: Int = 0
+    @State private var directionCalibrationOffset: Double = 0
+    @State private var showCalibrationControls = false
+    @State private var locationManager = CLLocationManager()
+    @State private var deviceHeading: Double = 0
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             
             VStack(spacing: 0) {
-                TopBarView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
-                
-                // Main UWB Content
-                VStack(spacing: 24) {
-                    if let device = connectedDevice {
-                        // Device Info
-                        VStack(spacing: 8) {
-                            Text(device.blePeripheralName)
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.white)
-                            
-                            Text(device.blePeripheralStatus ?? "Unknown")
-                                .font(.caption)
-                                .foregroundColor(.blue)
-                        }
-                        
-                        // Compass and Distance Display
-                        if device.blePeripheralStatus == statusRanging {
-                            VStack(spacing: 20) {
-                                // Distance
-                                if let distance = device.uwbLocation?.distance {
-                                    Text(String(format: "%.2f meters", distance))
-                                        .font(.title)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.green)
-                                }
-                                
-                                // Compass with Arrow
-                                ZStack {
-                                    // Background Compass
-                                    Image("compass")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: 200, height: 200)
-                                        .opacity(0.8)
-                                    
-                                    // Direction Cursor (Compass Image)
-                                    Image("compass")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: 60, height: 60)
-                                        .foregroundColor(.red)
-                                        .rotationEffect(.degrees(rotationAngle))
-                                        .animation(.easeInOut(duration: 0.3), value: rotationAngle)
-                                        .shadow(color: .black.opacity(0.5), radius: 3, x: 0, y: 2)
-                                    
-                                    // Center dot
-                                    Circle()
-                                        .fill(Color.white)
-                                        .frame(width: 8, height: 8)
-                                        .shadow(radius: 2)
-                                }
-                                .onTapGesture {
-                                    handleCompassTap()
-                                }
-                                
-                                // Elevation Display
-                                VStack(spacing: 8) {
-                                    Text("Elevation")
-                                        .font(.headline)
-                                        .foregroundColor(.white)
-                                    
-                                    Text(getElevationText(elevation))
-                                        .font(.title2)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(getElevationColor(elevation))
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .background(Color.white.opacity(0.1))
-                                        .cornerRadius(12)
-                                }
-                                
-                                // Azimuth Display
-                                Text("Azimuth: \(String(format: "%.1f°", rotationAngle))")
-                                    .font(.subheadline)
-                                    .foregroundColor(.white.opacity(0.8))
-                            }
-                        } else {
-                            VStack(spacing: 16) {
-                                Text("Device connected - initializing ranging...")
-                                    .font(.body)
-                                    .foregroundColor(.white.opacity(0.7))
-                                    .multilineTextAlignment(.center)
-                                
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(1.5)
-                            }
-                        }
-                    } else {
-                        // No device connected
-                        VStack(spacing: 16) {
-                            Image(systemName: "location.viewfinder")
-                                .font(.system(size: 60))
-                                .foregroundColor(.white.opacity(0.3))
-                            
-                            Text("No Device Connected")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.white)
-                            
-                            Text("Use Settings to connect to UWB devices")
-                                .font(.body)
-                                .foregroundColor(.white.opacity(0.7))
-                                .multilineTextAlignment(.center)
-                            
-                            Button("Go to Settings") {
-                                selectedTab = 4
-                            }
-                            .padding()
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
-                        }
+                // Main content with UIKit integration
+                if let device = currentDevice {
+                    ModernQorvoUIView(
+                        device: device,
+                        rotationAngle: $rotationAngle,
+                        elevation: $elevation,
+                        deviceHeading: $deviceHeading,
+                        directionCalibrationOffset: $directionCalibrationOffset,
+                        showCalibrationControls: $showCalibrationControls,
+                        onCompassTap: handleCompassTap,
+                        onCalibrationChanged: saveCalibrationOffset
+                    )
+                    .onAppear {
+                        startDeviceMonitoring()
+                        loadCalibrationOffset()
+                        setupLocationManager()
                     }
+                } else {
+                    // No device connected state
+                    NoDeviceConnectedView(selectedTab: $selectedTab)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
                 
-                Spacer()
+                // Multiple device selector if needed
+                if connectedDevices.count > 1 {
+                    CompactDeviceSelectorView(
+                        devices: connectedDevices,
+                        selectedIndex: $selectedDeviceIndex
+                    )
+                    .padding(.bottom, 20)
+                }
             }
         }
-        .onAppear {
-            startDeviceMonitoring()
-        }
+        .ignoresSafeArea(.all, edges: .top)
         .overlay(
-            // Debug Window
             debugWindow
         )
+        .onAppear {
+            setupLocationManager()
+            
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("DeviceHeadingUpdated"),
+                object: nil,
+                queue: .main
+            ) { notification in
+                if let heading = notification.userInfo?["heading"] as? CLHeading {
+                    self.updateDeviceHeading(heading)
+                }
+            }
+        }
     }
     
-    private var connectedDevice: qorvoDevice? {
-        qorvoDevices.compactMap { $0 }.first { device in
+    // MARK: - Computed Properties
+    private var connectedDevices: [qorvoDevice] {
+        qorvoDevices.compactMap { $0 }.filter { device in
             device.blePeripheralStatus == statusConnected || device.blePeripheralStatus == statusRanging
         }
     }
     
+    private var currentDevice: qorvoDevice? {
+        guard !connectedDevices.isEmpty else { return nil }
+        let safeIndex = min(selectedDeviceIndex, connectedDevices.count - 1)
+        return connectedDevices[safeIndex]
+    }
+    
+    private var isDeveloperModeEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "isDeveloperModeEnabled")
+    }
+    
+    private var calibratedRotationAngle: Double {
+        rotationAngle + directionCalibrationOffset
+    }
+    
+    // MARK: - Helper Methods
     private func startDeviceMonitoring() {
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             updateDeviceState()
         }
     }
     
+    private func saveCalibrationOffset() {
+        UserDefaults.standard.set(directionCalibrationOffset, forKey: "directionCalibrationOffset")
+    }
+    
+    private func loadCalibrationOffset() {
+        directionCalibrationOffset = UserDefaults.standard.double(forKey: "directionCalibrationOffset")
+    }
+    
+    private func setupLocationManager() {
+        locationManager.delegate = LocationManagerDelegate.shared
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.headingFilter = 1.0
+        
+        if CLLocationManager.headingAvailable() {
+            locationManager.startUpdatingHeading()
+        }
+    }
+    
+    private func updateDeviceHeading(_ heading: CLHeading) {
+        deviceHeading = heading.trueHeading
+    }
+    
     private func updateDeviceState() {
-        if let device = connectedDevice {
-            selectedDevice = device
-            
-            // Update arrow rotation and elevation based on direction using Qorvo's accurate calculation
+        let newConnectedDevices = connectedDevices
+        if connectedDevicesList.count != newConnectedDevices.count {
+            connectedDevicesList = newConnectedDevices
+            selectedDeviceIndex = 0
+        }
+        
+        if let device = currentDevice {
             if let direction = device.uwbLocation?.direction, device.blePeripheralStatus == statusRanging {
                 let azimuthValue = calculateAccurateAzimuth(direction)
                 
-                // Check if azimuth calculation is valid (not NaN or infinite)
-                if azimuthValue.isNaN || azimuthValue.isInfinite {
-                    return
+                if !azimuthValue.isNaN && !azimuthValue.isInfinite {
+                    let azimuthDegrees: Double
+                    if Settings().isDirectionEnable {
+                        azimuthDegrees = 90.0 * Double(azimuthValue)
+                    } else {
+                        azimuthDegrees = Double(azimuthValue) * 180.0 / .pi
+                    }
+                    
+                    let targetAngle = azimuthDegrees
+                    let currentAngle = rotationAngle
+                    let angleDifference = targetAngle - currentAngle
+                    let normalizedDifference = atan2(sin(angleDifference * .pi / 180), cos(angleDifference * .pi / 180)) * 180 / .pi
+                    
+                    rotationAngle = currentAngle + (normalizedDifference * 0.8)
+                    elevation = device.uwbLocation?.elevation ?? 0
                 }
-                
-                // Apply the same scaling as the previous accurate implementation
-                let azimuthDegrees: Double
-                if Settings().isDirectionEnable {
-                    // For direction-enabled devices (iPhone 14+)
-                    azimuthDegrees = 90.0 * Double(azimuthValue)
-                } else {
-                    // For non-direction-enabled devices
-                    azimuthDegrees = Double(azimuthValue) * 180.0 / .pi
-                }
-                
-                rotationAngle = azimuthDegrees
-                
-                // Update elevation
-                elevation = device.uwbLocation?.elevation ?? 0
             }
         } else {
-            selectedDevice = nil
             rotationAngle = 0
             elevation = 0
         }
     }
     
-    // Accurate azimuth calculation matching the previous Qorvo implementation
     private func calculateAccurateAzimuth(_ direction: simd_float3) -> Float {
         if Settings().isDirectionEnable {
             return asin(direction.x)
@@ -218,7 +181,6 @@ struct QorvoView: View {
         }
     }
     
-    // MARK: - Triple-tap functionality
     private func handleCompassTap() {
         tapCount += 1
         
@@ -229,47 +191,6 @@ struct QorvoView: View {
             } else if tapCount == 1 {
                 tapCount = 0
             }
-        }
-    }
-    
-    // MARK: - Elevation helpers
-    private func getElevationText(_ elevation: Int) -> String {
-        // Use more sensitive elevation detection based on actual angle
-        if let device = connectedDevice,
-           let direction = device.uwbLocation?.direction {
-            let elevationAngle = calculateElevationAngle(direction)
-            
-            // More sensitive thresholds for elevation detection
-            if elevationAngle > 5.0 {
-                return "ABOVE (+\(String(format: "%.1f", elevationAngle))°)"
-            } else if elevationAngle < -5.0 {
-                return "BELOW (\(String(format: "%.1f", elevationAngle))°)"
-            } else {
-                return "SAME LEVEL"
-            }
-        }
-        
-        // Fallback to original logic if no direction data
-        switch elevation {
-        case 1: return "ABOVE"
-        case -1: return "BELOW"
-        case 0: return "SAME LEVEL"
-        default: return "UNKNOWN"
-        }
-    }
-
-    private func calculateElevationAngle(_ direction: simd_float3) -> Float {
-        // Calculate elevation angle in degrees from direction vector
-        let elevationRad = atan2(direction.y, sqrt(direction.x * direction.x + direction.z * direction.z))
-        return elevationRad * 180 / .pi
-    }
-
-    private func getElevationColor(_ elevation: Int) -> Color {
-        switch elevation {
-        case 1: return .blue      // Above
-        case -1: return .orange   // Below
-        case 0: return .green     // Same level
-        default: return .gray     // Unknown
         }
     }
     
@@ -294,7 +215,7 @@ struct QorvoView: View {
                             .foregroundColor(.white)
                         }
                         
-                        if let device = connectedDevice,
+                        if let device = currentDevice,
                            let direction = device.uwbLocation?.direction,
                            let distance = device.uwbLocation?.distance {
                             
@@ -308,13 +229,11 @@ struct QorvoView: View {
                                 debugRow("Raw Azimuth", String(format: "%.6f", calculateAccurateAzimuth(direction)))
                                 debugRow("Scaled Azimuth", String(format: "%.2f°", rotationAngle))
                                 debugRow("Elevation Raw", String(elevation))
-                                debugRow("Elevation Text", getElevationText(elevation))
-                                debugRow("Elevation Angle", String(format: "%.2f°", calculateElevationAngle(direction)))
                                 debugRow("Direction Enabled", Settings().isDirectionEnable ? "YES" : "NO")
                                 debugRow("Device ID", String(device.bleUniqueID))
                                 debugRow("No Update Flag", device.uwbLocation?.noUpdate == true ? "YES" : "NO")
                             }
-            } else {
+                        } else {
                             Text("No UWB data available")
                                 .foregroundColor(.white.opacity(0.7))
                         }
@@ -346,3 +265,656 @@ struct QorvoView: View {
     }
 }
 
+// MARK: - Modern UIKit-based Main View
+struct ModernQorvoUIView: UIViewControllerRepresentable {
+    let device: qorvoDevice
+    @Binding var rotationAngle: Double
+    @Binding var elevation: Int
+    @Binding var deviceHeading: Double
+    @Binding var directionCalibrationOffset: Double
+    @Binding var showCalibrationControls: Bool
+    let onCompassTap: () -> Void
+    let onCalibrationChanged: () -> Void
+    
+    func makeUIViewController(context: Context) -> ModernQorvoUIViewController {
+        let controller = ModernQorvoUIViewController()
+        controller.onCompassTap = onCompassTap
+        controller.onCalibrationChanged = onCalibrationChanged
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: ModernQorvoUIViewController, context: Context) {
+        uiViewController.updateDevice(device)
+        uiViewController.updateRotation(rotationAngle + directionCalibrationOffset)
+        uiViewController.updateElevation(elevation)
+        uiViewController.updateDeviceHeading(deviceHeading)
+        uiViewController.updateCalibrationOffset(directionCalibrationOffset)
+        uiViewController.showCalibrationControls = showCalibrationControls
+    }
+}
+
+// MARK: - Modern UIKit View Controller
+class ModernQorvoUIViewController: UIViewController {
+    
+    // MARK: - Properties
+    private var scrollView: UIScrollView!
+    private var contentView: UIView!
+    private var deviceNameLabel: UILabel!
+    private var statusView: UIView!
+    private var statusIndicator: UIView!
+    private var statusLabel: UILabel!
+    private var distanceContainerView: UIView!
+    private var distanceValueLabel: UILabel!
+    private var distanceUnitLabel: UILabel!
+    private var compassContainerView: UIView!
+    private var compassBackgroundView: UIView!
+    private var compassImageView: UIImageView!
+    private var elevationContainerView: UIView!
+    private var elevationLabel: UILabel!
+    private var azimuthLabel: UILabel!
+    private var calibrationContainerView: UIView!
+    
+    var onCompassTap: (() -> Void)?
+    var onCalibrationChanged: (() -> Void)?
+    var showCalibrationControls: Bool = false {
+        didSet {
+            updateCalibrationVisibility()
+        }
+    }
+    
+    private var currentDevice: qorvoDevice?
+    private var isDeveloperModeEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "isDeveloperModeEnabled")
+    }
+    
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        setupConstraints()
+    }
+    
+    // MARK: - UI Setup
+    private func setupUI() {
+        view.backgroundColor = UIColor.black
+        
+        // Scroll view for content
+        scrollView = UIScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+        view.addSubview(scrollView)
+        
+        contentView = UIView()
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(contentView)
+        
+        setupDeviceHeader()
+        setupDistanceDisplay()
+        setupCompassView()
+        setupElevationAndAzimuthView()
+        setupCalibrationControls()
+    }
+    
+    private func setupDeviceHeader() {
+        // Device name
+        deviceNameLabel = UILabel()
+        deviceNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        deviceNameLabel.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+        deviceNameLabel.textColor = .white
+        deviceNameLabel.textAlignment = .center
+        deviceNameLabel.text = "Device Name"
+        contentView.addSubview(deviceNameLabel)
+        
+        // Status container
+        statusView = UIView()
+        statusView.translatesAutoresizingMaskIntoConstraints = false
+        statusView.backgroundColor = UIColor.white.withAlphaComponent(0.08)
+        statusView.layer.cornerRadius = 12
+        contentView.addSubview(statusView)
+        
+        // Status indicator
+        statusIndicator = UIView()
+        statusIndicator.translatesAutoresizingMaskIntoConstraints = false
+        statusIndicator.backgroundColor = .systemGreen
+        statusIndicator.layer.cornerRadius = 3
+        statusView.addSubview(statusIndicator)
+        
+        // Status label
+        statusLabel = UILabel()
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        statusLabel.textColor = .systemGreen
+        statusLabel.text = "Ranging"
+        statusView.addSubview(statusLabel)
+    }
+    
+    private func setupDistanceDisplay() {
+        distanceContainerView = UIView()
+        distanceContainerView.translatesAutoresizingMaskIntoConstraints = false
+        distanceContainerView.backgroundColor = UIColor.white.withAlphaComponent(0.05)
+        distanceContainerView.layer.cornerRadius = 16
+        contentView.addSubview(distanceContainerView)
+        
+        let distanceTitleLabel = UILabel()
+        distanceTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        distanceTitleLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        distanceTitleLabel.textColor = UIColor.white.withAlphaComponent(0.7)
+        distanceTitleLabel.text = "DISTANCE"
+        distanceTitleLabel.textAlignment = .center
+        distanceContainerView.addSubview(distanceTitleLabel)
+        
+        distanceValueLabel = UILabel()
+        distanceValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        distanceValueLabel.font = UIFont.systemFont(ofSize: 42, weight: .bold)
+        distanceValueLabel.textColor = .systemGreen
+        distanceValueLabel.text = "0.00"
+        distanceValueLabel.textAlignment = .center
+        distanceContainerView.addSubview(distanceValueLabel)
+        
+        distanceUnitLabel = UILabel()
+        distanceUnitLabel.translatesAutoresizingMaskIntoConstraints = false
+        distanceUnitLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        distanceUnitLabel.textColor = UIColor.white.withAlphaComponent(0.6)
+        distanceUnitLabel.text = "meters"
+        distanceUnitLabel.textAlignment = .center
+        distanceContainerView.addSubview(distanceUnitLabel)
+        
+        // Distance constraints
+        NSLayoutConstraint.activate([
+            distanceTitleLabel.topAnchor.constraint(equalTo: distanceContainerView.topAnchor, constant: 16),
+            distanceTitleLabel.centerXAnchor.constraint(equalTo: distanceContainerView.centerXAnchor),
+            
+            distanceValueLabel.topAnchor.constraint(equalTo: distanceTitleLabel.bottomAnchor, constant: 8),
+            distanceValueLabel.centerXAnchor.constraint(equalTo: distanceContainerView.centerXAnchor),
+            
+            distanceUnitLabel.topAnchor.constraint(equalTo: distanceValueLabel.bottomAnchor, constant: 4),
+            distanceUnitLabel.centerXAnchor.constraint(equalTo: distanceContainerView.centerXAnchor),
+            distanceUnitLabel.bottomAnchor.constraint(equalTo: distanceContainerView.bottomAnchor, constant: -16)
+        ])
+    }
+    
+    private func setupCompassView() {
+        compassContainerView = UIView()
+        compassContainerView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(compassContainerView)
+        
+        let directionTitleLabel = UILabel()
+        directionTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        directionTitleLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        directionTitleLabel.textColor = UIColor.white.withAlphaComponent(0.7)
+        directionTitleLabel.text = "DIRECTION"
+        directionTitleLabel.textAlignment = .center
+        compassContainerView.addSubview(directionTitleLabel)
+        
+        // Compass background with cardinal directions
+        compassBackgroundView = UIView()
+        compassBackgroundView.translatesAutoresizingMaskIntoConstraints = false
+        compassBackgroundView.backgroundColor = .clear
+        compassBackgroundView.layer.borderColor = UIColor.white.withAlphaComponent(0.2).cgColor
+        compassBackgroundView.layer.borderWidth = 2
+        compassBackgroundView.layer.cornerRadius = 100
+        compassContainerView.addSubview(compassBackgroundView)
+        
+        // Add cardinal direction labels
+        addCardinalDirections()
+        
+        // Compass arrow using asset
+        compassImageView = UIImageView()
+        compassImageView.translatesAutoresizingMaskIntoConstraints = false
+        compassImageView.image = UIImage(named: "compass")
+        compassImageView.contentMode = .scaleAspectFit
+        compassImageView.tintColor = .systemRed
+        compassContainerView.addSubview(compassImageView)
+        
+        // Add tap gesture
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(compassTapped))
+        compassImageView.addGestureRecognizer(tapGesture)
+        compassImageView.isUserInteractionEnabled = true
+        
+        // Center dot
+        let centerDot = UIView()
+        centerDot.translatesAutoresizingMaskIntoConstraints = false
+        centerDot.backgroundColor = .white
+        centerDot.layer.cornerRadius = 4
+        compassContainerView.addSubview(centerDot)
+        
+        // Compass constraints
+        NSLayoutConstraint.activate([
+            directionTitleLabel.topAnchor.constraint(equalTo: compassContainerView.topAnchor),
+            directionTitleLabel.centerXAnchor.constraint(equalTo: compassContainerView.centerXAnchor),
+            
+            compassBackgroundView.topAnchor.constraint(equalTo: directionTitleLabel.bottomAnchor, constant: 16),
+            compassBackgroundView.centerXAnchor.constraint(equalTo: compassContainerView.centerXAnchor),
+            compassBackgroundView.widthAnchor.constraint(equalToConstant: 200),
+            compassBackgroundView.heightAnchor.constraint(equalToConstant: 200),
+            
+            compassImageView.centerXAnchor.constraint(equalTo: compassBackgroundView.centerXAnchor),
+            compassImageView.centerYAnchor.constraint(equalTo: compassBackgroundView.centerYAnchor),
+            compassImageView.widthAnchor.constraint(equalToConstant: 120),
+            compassImageView.heightAnchor.constraint(equalToConstant: 120),
+            
+            centerDot.centerXAnchor.constraint(equalTo: compassBackgroundView.centerXAnchor),
+            centerDot.centerYAnchor.constraint(equalTo: compassBackgroundView.centerYAnchor),
+            centerDot.widthAnchor.constraint(equalToConstant: 8),
+            centerDot.heightAnchor.constraint(equalToConstant: 8),
+            
+            compassContainerView.bottomAnchor.constraint(equalTo: compassBackgroundView.bottomAnchor)
+        ])
+    }
+    
+    private func addCardinalDirections() {
+        let directions = [
+            ("N", 0, -90),
+            ("E", 90, 0),
+            ("S", 0, 90),
+            ("W", -90, 0)
+        ]
+        
+        for (text, xOffset, yOffset) in directions {
+            let label = UILabel()
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
+            label.textColor = UIColor.white.withAlphaComponent(0.8)
+            label.text = text
+            label.textAlignment = .center
+            compassBackgroundView.addSubview(label)
+            
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: compassBackgroundView.centerXAnchor, constant: CGFloat(xOffset)),
+                label.centerYAnchor.constraint(equalTo: compassBackgroundView.centerYAnchor, constant: CGFloat(yOffset)),
+                label.widthAnchor.constraint(equalToConstant: 20),
+                label.heightAnchor.constraint(equalToConstant: 20)
+            ])
+        }
+    }
+    
+    private func setupElevationAndAzimuthView() {
+        elevationContainerView = UIView()
+        elevationContainerView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(elevationContainerView)
+        
+        // Elevation
+        let (elevationStack, elevationValueLabel) = createInfoStack(title: "ELEVATION", value: "SAME LEVEL")
+        elevationLabel = elevationValueLabel
+        elevationContainerView.addSubview(elevationStack)
+        
+        // Azimuth
+        let (azimuthStack, azimuthValueLabel) = createInfoStack(title: "AZIMUTH", value: "0.0°")
+        azimuthLabel = azimuthValueLabel
+        elevationContainerView.addSubview(azimuthStack)
+        
+        // Constraints
+        NSLayoutConstraint.activate([
+            elevationStack.leadingAnchor.constraint(equalTo: elevationContainerView.leadingAnchor),
+            elevationStack.topAnchor.constraint(equalTo: elevationContainerView.topAnchor),
+            elevationStack.trailingAnchor.constraint(equalTo: elevationContainerView.centerXAnchor, constant: -8),
+            elevationStack.bottomAnchor.constraint(equalTo: elevationContainerView.bottomAnchor),
+            
+            azimuthStack.leadingAnchor.constraint(equalTo: elevationContainerView.centerXAnchor, constant: 8),
+            azimuthStack.topAnchor.constraint(equalTo: elevationContainerView.topAnchor),
+            azimuthStack.trailingAnchor.constraint(equalTo: elevationContainerView.trailingAnchor),
+            azimuthStack.bottomAnchor.constraint(equalTo: elevationContainerView.bottomAnchor)
+        ])
+    }
+    
+    private func createInfoStack(title: String, value: String) -> (UIStackView, UILabel) {
+        let titleLabel = UILabel()
+        titleLabel.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+        titleLabel.textColor = UIColor.white.withAlphaComponent(0.7)
+        titleLabel.text = title
+        titleLabel.textAlignment = .center
+        
+        let valueLabel = UILabel()
+        valueLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        valueLabel.textColor = .white
+        valueLabel.text = value
+        valueLabel.textAlignment = .center
+        
+        let container = UIView()
+        container.backgroundColor = UIColor.white.withAlphaComponent(0.05)
+        container.layer.cornerRadius = 8
+        
+        let stack = UIStackView(arrangedSubviews: [titleLabel, valueLabel])
+        stack.axis = .vertical
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8)
+        ])
+        
+        let finalStack = UIStackView(arrangedSubviews: [container])
+        finalStack.translatesAutoresizingMaskIntoConstraints = false
+        return (finalStack, valueLabel)
+    }
+    
+    private func setupCalibrationControls() {
+        calibrationContainerView = UIView()
+        calibrationContainerView.translatesAutoresizingMaskIntoConstraints = false
+        calibrationContainerView.backgroundColor = UIColor(red: 0.14, green: 0.13, blue: 0.16, alpha: 1.0) // #232229
+        calibrationContainerView.layer.cornerRadius = 12
+        calibrationContainerView.isHidden = true
+        contentView.addSubview(calibrationContainerView)
+        
+        // Add calibration controls content here if needed
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        titleLabel.textColor = UIColor.white.withAlphaComponent(0.8)
+        titleLabel.text = "CALIBRATION CONTROLS"
+        titleLabel.textAlignment = .center
+        calibrationContainerView.addSubview(titleLabel)
+        
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: calibrationContainerView.topAnchor, constant: 16),
+            titleLabel.centerXAnchor.constraint(equalTo: calibrationContainerView.centerXAnchor),
+            titleLabel.bottomAnchor.constraint(equalTo: calibrationContainerView.bottomAnchor, constant: -16)
+        ])
+    }
+    
+    private func setupConstraints() {
+        NSLayoutConstraint.activate([
+            // Scroll view
+            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            
+            // Content view
+            contentView.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            contentView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            contentView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            contentView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+            
+            // Device header
+            deviceNameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
+            deviceNameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            deviceNameLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            
+            statusView.topAnchor.constraint(equalTo: deviceNameLabel.bottomAnchor, constant: 12),
+            statusView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            statusView.heightAnchor.constraint(equalToConstant: 28),
+            
+            statusIndicator.leadingAnchor.constraint(equalTo: statusView.leadingAnchor, constant: 12),
+            statusIndicator.centerYAnchor.constraint(equalTo: statusView.centerYAnchor),
+            statusIndicator.widthAnchor.constraint(equalToConstant: 6),
+            statusIndicator.heightAnchor.constraint(equalToConstant: 6),
+            
+            statusLabel.leadingAnchor.constraint(equalTo: statusIndicator.trailingAnchor, constant: 6),
+            statusLabel.centerYAnchor.constraint(equalTo: statusView.centerYAnchor),
+            statusLabel.trailingAnchor.constraint(equalTo: statusView.trailingAnchor, constant: -12),
+            
+            // Distance
+            distanceContainerView.topAnchor.constraint(equalTo: statusView.bottomAnchor, constant: 24),
+            distanceContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            distanceContainerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            
+            // Compass
+            compassContainerView.topAnchor.constraint(equalTo: distanceContainerView.bottomAnchor, constant: 24),
+            compassContainerView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            
+            // Elevation and Azimuth
+            elevationContainerView.topAnchor.constraint(equalTo: compassContainerView.bottomAnchor, constant: 24),
+            elevationContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            elevationContainerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            
+            // Calibration
+            calibrationContainerView.topAnchor.constraint(equalTo: elevationContainerView.bottomAnchor, constant: 24),
+            calibrationContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            calibrationContainerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            calibrationContainerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -40)
+        ])
+    }
+    
+    // MARK: - Update Methods
+    func updateDevice(_ device: qorvoDevice) {
+        currentDevice = device
+        deviceNameLabel.text = device.blePeripheralName
+        
+        let isRanging = device.blePeripheralStatus == statusRanging
+        statusIndicator.backgroundColor = isRanging ? .systemGreen : .systemBlue
+        statusLabel.textColor = isRanging ? .systemGreen : .systemBlue
+        statusLabel.text = device.blePeripheralStatus ?? "Unknown"
+        
+        if let distance = device.uwbLocation?.distance {
+            distanceValueLabel.text = String(format: "%.2f", distance)
+            distanceValueLabel.textColor = .systemGreen
+        } else {
+            distanceValueLabel.text = "--"
+            distanceValueLabel.textColor = UIColor.white.withAlphaComponent(0.5)
+        }
+    }
+    
+    func updateRotation(_ angle: Double) {
+        UIView.animate(withDuration: 0.1, delay: 0, options: .curveEaseInOut, animations: {
+            self.compassImageView.transform = CGAffineTransform(rotationAngle: CGFloat(angle * .pi / 180))
+        }, completion: nil)
+        
+        azimuthLabel?.text = String(format: "%.1f°", angle)
+    }
+    
+    func updateElevation(_ elevation: Int) {
+        let elevationText = getElevationText(elevation)
+        let elevationColor = getElevationColor(elevation)
+        
+        elevationLabel?.text = elevationText
+        elevationLabel?.textColor = elevationColor
+    }
+    
+    func updateDeviceHeading(_ heading: Double) {
+        // Apply true north alignment to compass background
+        UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseInOut, animations: {
+            self.compassBackgroundView.transform = CGAffineTransform(rotationAngle: CGFloat(-heading * .pi / 180))
+        }, completion: nil)
+    }
+    
+    func updateCalibrationOffset(_ offset: Double) {
+        // Update calibration display if needed
+    }
+    
+    private func updateCalibrationVisibility() {
+        calibrationContainerView.isHidden = !showCalibrationControls || !isDeveloperModeEnabled
+    }
+    
+    // MARK: - Helper Methods
+    private func getElevationText(_ elevation: Int) -> String {
+        if let device = currentDevice,
+           let direction = device.uwbLocation?.direction {
+            let elevationAngle = calculateElevationAngle(direction)
+            
+            if elevationAngle > 5.0 {
+                return "ABOVE (+\(String(format: "%.1f", elevationAngle))°)"
+            } else if elevationAngle < -5.0 {
+                return "BELOW (\(String(format: "%.1f", elevationAngle))°)"
+            } else {
+                return "SAME LEVEL"
+            }
+        }
+        
+        switch elevation {
+        case 1: return "ABOVE"
+        case -1: return "BELOW"
+        case 0: return "SAME LEVEL"
+        default: return "UNKNOWN"
+        }
+    }
+    
+    private func calculateElevationAngle(_ direction: simd_float3) -> Float {
+        let elevationRad = atan2(direction.y, sqrt(direction.x * direction.x + direction.z * direction.z))
+        return elevationRad * 180 / .pi
+    }
+    
+    private func getElevationColor(_ elevation: Int) -> UIColor {
+        switch elevation {
+        case 1: return .systemBlue
+        case -1: return .systemOrange
+        case 0: return .systemGreen
+        default: return .systemGray
+        }
+    }
+    
+    @objc private func compassTapped() {
+        onCompassTap?()
+    }
+}
+
+// MARK: - Supporting Views
+struct NoDeviceConnectedView: View {
+    @Binding var selectedTab: Int
+    
+    var body: some View {
+        VStack(spacing: 32) {
+            Spacer()
+            
+            Image(systemName: "location.viewfinder")
+                .font(.system(size: 80))
+                .foregroundStyle(
+                    LinearGradient(
+                        gradient: Gradient(colors: [Color.blue.opacity(0.6), Color.purple.opacity(0.6)]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: .blue.opacity(0.3), radius: 12)
+            
+            VStack(spacing: 12) {
+                Text("No Device Connected")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                
+                Text("Connect a UWB device in Settings to start ranging")
+                    .font(.body)
+                    .foregroundColor(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
+            
+            Button("Go to Settings") {
+                selectedTab = 4
+            }
+            .font(.headline)
+            .fontWeight(.semibold)
+            .foregroundColor(.white)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 16)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [Color.blue, Color.purple]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .cornerRadius(16)
+            .shadow(color: .blue.opacity(0.3), radius: 8, x: 0, y: 4)
+            
+            Spacer()
+        }
+        .padding()
+    }
+}
+
+struct CompactDeviceSelectorView: View {
+    let devices: [qorvoDevice]
+    @Binding var selectedIndex: Int
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("Devices (\(devices.count))")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(.white.opacity(0.7))
+                .textCase(.uppercase)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(devices.enumerated()), id: \.offset) { index, device in
+                        CompactDeviceCard(device: device, index: index, isSelected: selectedIndex == index) {
+                            selectedIndex = index
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.05))
+        )
+        .padding(.horizontal, 16)
+    }
+}
+
+struct CompactDeviceCard: View {
+    let device: qorvoDevice
+    let index: Int
+    let isSelected: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(device.blePeripheralStatus == statusRanging ? Color.green : Color.blue)
+                        .frame(width: 6, height: 6)
+                    
+                    Text(device.blePeripheralName)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+                
+                if let distance = device.uwbLocation?.distance {
+                    Text("\(String(format: "%.1f", distance))m")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(device.blePeripheralStatus == statusRanging ? .green : .blue)
+                } else {
+                    Text("...")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.blue.opacity(0.3) : Color.white.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                isSelected ? Color.blue.opacity(0.6) : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Location Manager Delegate
+class LocationManagerDelegate: NSObject, CLLocationManagerDelegate, ObservableObject {
+    static let shared = LocationManagerDelegate()
+    
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        NotificationCenter.default.post(
+            name: NSNotification.Name("DeviceHeadingUpdated"),
+            object: nil,
+            userInfo: ["heading": newHeading]
+        )
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("Location manager failed with error: \(error.localizedDescription)")
+    }
+}

@@ -318,9 +318,8 @@ extension SettingsView {
             return
         }
         
-        // Cache the token to correlate updates with this accessory.
+        // Run configuration for this device (token caching is now handled internally)
         if let config = sessionManager.configuration {
-            sessionManager.cacheToken(config.accessoryDiscoveryToken, accessoryName: name)
             sessionManager.runConfiguration(config, for: deviceID)
         }
         
