@@ -158,4 +158,4 @@ When developer mode is enabled (tap version 5 times):
 
 ## 📄 License
 
-© 2024 Proxi Team. All rights reserved.
+© 2024 Proxi Team. All rights reserved. 
