@@ -1,4 +1,5 @@
 
+
 import SwiftUI
 import CoreBluetooth
 import NearbyInteraction
@@ -378,6 +379,8 @@ struct HostDeviceCard: View {
     let peripheral: CBPeripheral
     let bleManager: BLEManager
     @State private var refreshTrigger: Bool = false
+    @State private var currentDistance: Float = 0.0
+    @State private var distanceTimer: Timer?
     
     var body: some View {
         VStack(spacing: 16) {
@@ -443,27 +446,21 @@ struct HostDeviceCard: View {
                         .font(.subheadline)
                         .foregroundColor(.green)
                     
-                    // Distance display with refresh trigger
-                    if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "location.fill")
-                                .font(.caption)
-                                .foregroundColor(.green)
-                            Text("\(String(format: "%.2f", deviceData.uwbLocation.distance))m")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.green)
-                        }
-                        .id(refreshTrigger) // Force refresh when trigger changes
-                    } else {
-                        HStack(spacing: 4) {
-                            Image(systemName: "location.slash")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.5))
-                            Text("Distance unavailable")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.5))
-                        }
+                    // Distance display with real-time updates
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.fill")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                        Text("\(String(format: "%.2f", currentDistance))m")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.green)
+                    }
+                    .onAppear {
+                        startDistanceUpdates()
+                    }
+                    .onDisappear {
+                        stopDistanceUpdates()
                     }
                 }
                 
@@ -488,6 +485,31 @@ struct HostDeviceCard: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
+    }
+    
+    // MARK: - Distance Update Methods
+    
+    private func startDistanceUpdates() {
+        // Update immediately
+        updateDistance()
+        
+        // Start timer for frequent updates
+        distanceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            updateDistance()
+        }
+    }
+    
+    private func stopDistanceUpdates() {
+        distanceTimer?.invalidate()
+        distanceTimer = nil
+    }
+    
+    private func updateDistance() {
+        if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
+            currentDistance = deviceData.uwbLocation.distance
+        } else {
+            currentDistance = 0.0
+        }
     }
 }
 

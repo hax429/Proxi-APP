@@ -65,6 +65,7 @@ struct QorvoView: View {
     @State private var connectedDevicesList: [CBPeripheral] = []
     @State private var showDebugWindow = false
     @State private var tapCount = 0
+    @State private var showTapFeedback = false
     
     // MARK: - Direction and Location Tracking
     @State private var rotationAngle: Double = 0          // Compass rotation angle
@@ -115,6 +116,12 @@ struct QorvoView: View {
         .ignoresSafeArea(.all, edges: .top)
         .overlay(
             debugWindow
+        )
+        .overlay(
+            tapFeedbackOverlay
+        )
+        .overlay(
+            developerControlsOverlay
         )
         .onAppear {
             setupLocationManager()
@@ -240,11 +247,22 @@ struct QorvoView: View {
     private func handleCompassTap() {
         tapCount += 1
         
+        // Show tap feedback
+        showTapFeedback = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            if self.tapCount >= 5 {
-                self.showDebugWindow = true
-                self.tapCount = 0
-            } else {
+            showTapFeedback = false
+        }
+        
+        // Check immediately if we've reached 5 taps
+        if tapCount >= 5 {
+            showDebugWindow = true
+            tapCount = 0
+            return
+        }
+        
+        // Reset tap count after 2 seconds if not enough taps
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            if self.tapCount < 5 {
                 self.tapCount = 0
             }
         }
@@ -288,6 +306,8 @@ struct QorvoView: View {
                                 debugRow("Direction Enabled", Settings().isDirectionEnable ? "YES" : "NO")
                                 debugRow("Device ID", currentDevice?.identifier.uuidString ?? "Unknown")
                                 debugRow("No Update Flag", deviceData.uwbLocation.noUpdate ? "YES" : "NO")
+                                debugRow("Developer Mode", isDeveloperModeEnabled ? "ENABLED" : "DISABLED")
+                                debugRow("Tap Count", "\(tapCount)/5")
                             }
                         } else {
                             Text("No UWB data available")
@@ -318,6 +338,92 @@ struct QorvoView: View {
             Spacer()
         }
         .font(.caption)
+    }
+    
+    // MARK: - Tap Feedback Overlay
+    private var tapFeedbackOverlay: some View {
+        Group {
+            if showTapFeedback {
+                VStack {
+                    Spacer()
+                    
+                    HStack {
+                        Spacer()
+                        
+                        VStack(spacing: 4) {
+                            Text("\(tapCount)/5")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                            
+                            Text("Taps to Debug")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        .padding()
+                        .background(Color.black.opacity(0.8))
+                        .cornerRadius(12)
+                        
+                        Spacer()
+                    }
+                    .padding(.bottom, 100)
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: showTapFeedback)
+            }
+        }
+    }
+    
+    // MARK: - Developer Controls Overlay
+    private var developerControlsOverlay: some View {
+        Group {
+            if isDeveloperModeEnabled {
+                VStack {
+                    Spacer()
+                    
+                    HStack {
+                        Spacer()
+                        
+                        VStack(spacing: 8) {
+                            // Developer mode indicator
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Color.orange)
+                                    .frame(width: 6, height: 6)
+                                Text("DEV")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.orange)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(0.6))
+                            .cornerRadius(6)
+                            
+                            // Debug toggle
+                            HStack(spacing: 12) {
+                                Text("Debug")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.white)
+                                
+                                Toggle("", isOn: $showDebugWindow)
+                                    .toggleStyle(SwitchToggleStyle(tint: .green))
+                                    .scaleEffect(0.8)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.8))
+                            .cornerRadius(8)
+                        }
+                    }
+                    .padding(.bottom, 100)
+                    .padding(.trailing, 16)
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.3), value: isDeveloperModeEnabled)
+            }
+        }
     }
 }
 
@@ -945,10 +1051,11 @@ struct CompactDeviceCard: View {
             VStack(spacing: 4) {
                 HStack(spacing: 4) {
                     let deviceData = bleManager.getDeviceData(for: peripheral.identifier)
+                    let isHostDevice = index == 0 // First device is considered the host
                     let isRanging = deviceData?.isRanging ?? false
                     
                     Circle()
-                        .fill(isRanging ? Color.green : Color.blue)
+                        .fill(isHostDevice ? Color.green : Color.blue)
                         .frame(width: 6, height: 6)
                     
                     Text(peripheral.name ?? "Unknown Device")
@@ -960,10 +1067,11 @@ struct CompactDeviceCard: View {
                 
                 if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
                     let distance = deviceData.uwbLocation.distance
+                    let isHostDevice = index == 0 // First device is considered the host
                     Text("\(String(format: "%.1f", distance))m")
                         .font(.caption2)
                         .fontWeight(.semibold)
-                        .foregroundColor(deviceData.isRanging ? .green : .blue)
+                        .foregroundColor(isHostDevice ? .green : .blue)
                 } else {
                     Text("...")
                         .font(.caption2)
@@ -974,11 +1082,11 @@ struct CompactDeviceCard: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.blue.opacity(0.3) : Color.white.opacity(0.08))
+                    .fill(isSelected ? (index == 0 ? Color.green.opacity(0.3) : Color.blue.opacity(0.3)) : Color.white.opacity(0.08))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(
-                                isSelected ? Color.blue.opacity(0.6) : Color.clear,
+                                isSelected ? (index == 0 ? Color.green.opacity(0.6) : Color.blue.opacity(0.6)) : Color.clear,
                                 lineWidth: 1
                             )
                     )
