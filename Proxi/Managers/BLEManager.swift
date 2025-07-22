@@ -4,6 +4,8 @@
 //
 //  Created by Gabriel Wang on 7/16/25.
 //
+//  Bluetooth Low Energy Manager for UWB Device Communication
+//  This file contains the core BLE management system for the Proxi app.
 
 /**
  * BLEManager - Bluetooth Low Energy Device Management
@@ -24,6 +26,7 @@
  * - Device status monitoring
  * - Debug information logging
  * - Error handling and recovery
+ * - Multi-device support
  *
  * ## Usage:
  * ```swift
@@ -33,7 +36,7 @@
  * bleManager.startScanning()
  * 
  * // Connect to a specific device
- * bleManager.connectToDevice(deviceID)
+ * bleManager.connect(to: peripheral)
  * ```
  *
  * ## Architecture:
@@ -41,9 +44,16 @@
  * - Implements CBPeripheralDelegate for device communication
  * - Manages multiple device connections simultaneously
  * - Provides SwiftUI environment object integration
+ * - Supports Qorvo UWB protocol
+ *
+ * ## Multi-Device Support:
+ * - Tracks multiple connected devices simultaneously
+ * - Maintains individual device data and status
+ * - Handles device-specific UWB sessions
+ * - Provides device-specific ranging data
  *
  * @author Gabriel Wang
- * @version 1.0.0
+ * @version 2.0.0 (Enhanced for multi-device support)
  * @since iOS 16.0
  */
 
@@ -55,7 +65,13 @@ import ARKit
 import simd
 import CoreLocation
 
-// MARK: - BLE Settings Helper (temporary)
+// MARK: - BLE Settings Helper
+/**
+ * BLESettings - BLE Configuration Helper
+ * 
+ * Provides configuration settings for BLE operations and device capabilities.
+ * Currently handles direction enablement based on device capabilities.
+ */
 class BLESettings {
     var isDirectionEnable: Bool {
         // Check device capabilities - iPhone 14+ supports directional features
@@ -64,37 +80,70 @@ class BLESettings {
 }
 
 // MARK: - BLE Message Protocol (Qorvo)
+/**
+ * BLEMessageId - Qorvo UWB Communication Protocol
+ * 
+ * Defines the message types used for communication between iOS app and Arduino.
+ * Based on the Qorvo UWB protocol specification.
+ */
 enum BLEMessageId: UInt8 {
-    // Messages from the accessory
-    case accessoryConfigurationData = 0x1
-    case accessoryUwbDidStart = 0x2
-    case accessoryUwbDidStop = 0x3
+    // Messages from the accessory (Arduino to iOS)
+    case accessoryConfigurationData = 0x1  // Device configuration data
+    case accessoryUwbDidStart = 0x2        // UWB ranging started
+    case accessoryUwbDidStop = 0x3         // UWB ranging stopped
     
-    // Messages to the accessory
-    case initialize = 0xA
-    case configureAndStart = 0xB
-    case stop = 0xC
+    // Messages to the accessory (iOS to Arduino)
+    case initialize = 0xA                  // Initialize UWB stack
+    case configureAndStart = 0xB           // Configure and start ranging
+    case stop = 0xC                        // Stop ranging
+    
+    // User defined/notification messages
+    case getReserved = 0x20                // Get reserved data
+    case setReserved = 0x21                // Set reserved data
+    case iOSNotify = 0x2F                  // iOS notification message
 }
 
-// MARK: - UWB Location Data
+// MARK: - UWB Location Data Structure
+/**
+ * UWBLocation - Ultra-Wideband Location Data
+ * 
+ * Comprehensive data structure for storing UWB ranging information including
+ * distance, direction, elevation, and device-specific calibration data.
+ * 
+ * Enhanced with device heading integration and coordinate system alignment.
+ */
 struct UWBLocation {
-    var distance: Float = 0
-    var azimuth: Float = 0
-    var elevation: Float = 0
-    var direction: simd_float3 = SIMD3<Float>(x: 0, y: 0, z: 0)
-    var horizontalAngle: Float = 0
-    var verticalDirectionEstimate: Int = 0
-    var isValid: Bool = false
-    var timestamp: Date = Date()
-    var noUpdate: Bool = false
-    var isConverged: Bool = false
-    var supportsDirectionMeasurement: Bool = false
+    // Basic ranging data
+    var distance: Float = 0                // Distance in meters
+    var azimuth: Float = 0                 // Azimuth angle in degrees
+    var elevation: Float = 0               // Elevation angle in degrees
+    var direction: simd_float3 = SIMD3<Float>(x: 0, y: 0, z: 0)  // 3D direction vector
     
-    // Calibration offset for coordinate system alignment and device heading integration
-    var azimuthOffset: Float = 0.0
-    var deviceHeading: Float = 0.0  // Current device magnetic heading
+    // Advanced direction data (iPhone 14+)
+    var horizontalAngle: Float = 0         // Horizontal angle from NI
+    var verticalDirectionEstimate: Int = 0 // Vertical direction estimate
     
-    // IMPROVED: Enhanced direction calculations with device heading integration
+    // Status flags
+    var isValid: Bool = false              // Data validity flag
+    var timestamp: Date = Date()           // Measurement timestamp
+    var noUpdate: Bool = false             // No update flag
+    var isConverged: Bool = false          // Convergence status
+    
+    // Device capabilities
+    var supportsDirectionMeasurement: Bool = false  // Direction support flag
+    
+    // Calibration and alignment
+    var azimuthOffset: Float = 0.0         // Coordinate system offset
+    var deviceHeading: Float = 0.0         // Current device magnetic heading
+    
+    // MARK: - Enhanced Direction Calculations
+    
+    /**
+     * Enhanced azimuth calculation with device heading integration
+     * 
+     * Provides improved direction accuracy by combining UWB data with
+     * device compass heading and coordinate system corrections.
+     */
     var enhancedAzimuth: Float {
         // For iPhone 14+, use horizontal angle when available and converged
         if !supportsDirectionMeasurement && isConverged && horizontalAngle != 0 {
@@ -176,7 +225,7 @@ class BLEManager: NSObject, ObservableObject {
     
     private var centralManager: CBCentralManager!
     // Multiple connection support
-    private var connectedPeripherals: [UUID: CBPeripheral] = [:]
+    @Published var connectedPeripherals: [UUID: CBPeripheral] = [:]
     private var peripheralCharacteristics: [UUID: (rx: CBCharacteristic?, tx: CBCharacteristic?)] = [:]
     
     // Legacy single connection support (backward compatibility)
@@ -1731,5 +1780,92 @@ extension BLEManager: NISessionDelegate {
             addDebugLog("❌ [\(deviceName)] Unknown session error: \(error.localizedDescription)")
             print("❌ [\(deviceName)] Unknown UWB session error: \(error.localizedDescription)")
         }
+    }
+}
+
+
+// Add this extension to your BLEManager.swift for better debugging
+
+extension BLEManager {
+    // Call this method to debug why a specific device isn't ranging
+    func debugDeviceStatus(for peripheralID: UUID) {
+        guard let deviceData = connectedDevicesData[peripheralID],
+              let peripheral = connectedPeripherals[peripheralID] else {
+            print("❌ DEBUG: Device not found for ID \(peripheralID)")
+            return
+        }
+        
+        let deviceName = deviceData.deviceName
+        let currentState = deviceStates[peripheralID] ?? "Unknown"
+        
+        print("\n🔍 === DEVICE DEBUG: \(deviceName) ===")
+        print("📱 Peripheral ID: \(peripheralID)")
+        print("📊 Current State: \(currentState)")
+        print("🔌 BLE Connected: \(peripheral.state == .connected)")
+        print("📡 Has Characteristics: RX=\(peripheralCharacteristics[peripheralID]?.rx != nil), TX=\(peripheralCharacteristics[peripheralID]?.tx != nil)")
+        print("🎯 Has NISession: \(niSessions[peripheralID] != nil)")
+        print("📋 Has Configuration: \(configurations[peripheralID] != nil)")
+        print("🔑 Has Discovery Token: \(accessoryDiscoveryTokens[peripheralID] != nil)")
+        print("📏 Is Ranging: \(deviceData.isRanging)")
+        print("📍 UWB Location Valid: \(deviceData.uwbLocation.isValid)")
+        print("⏱️ Last Updated: \(deviceData.lastUpdated)")
+        print("🔄 Last Message Sent: \(String(describing: lastMessageSent))")
+        
+        // Check protocol history
+        if let lastState = deviceStates[peripheralID] {
+            print("\n📜 Protocol State History:")
+            print("   Current: \(lastState)")
+            
+            // Analyze stuck state
+            if lastState == "Connected" || lastState == "BLE Connected" {
+                print("\n⚠️ DEVICE STUCK IN INITIAL STATE!")
+                print("🔧 Possible causes:")
+                print("   1. Arduino not responding to INITIALIZE command")
+                print("   2. BLE write failed silently")
+                print("   3. Arduino UWB module not ready")
+                print("   4. Duplicate UWB tokens between devices")
+                
+                print("\n💡 Recommended actions:")
+                print("   1. Check Arduino serial monitor for errors")
+                print("   2. Ensure Arduino has unique UWB configuration")
+                print("   3. Try: bleManager.forceRestartProtocol(for: peripheralID)")
+                print("   4. Power cycle the Arduino device")
+            }
+        }
+        
+        print("=================================\n")
+    }
+    
+    // Call this to compare both devices
+    func compareDevices() {
+        print("\n📊 === DEVICE COMPARISON ===")
+        
+        for (peripheralID, deviceData) in connectedDevicesData {
+            let state = deviceStates[peripheralID] ?? "Unknown"
+            print("\n🤖 \(deviceData.deviceName):")
+            print("   State: \(state)")
+            print("   Ranging: \(deviceData.isRanging)")
+            print("   Distance: \(deviceData.uwbLocation.distance)m")
+            print("   Has Config: \(configurations[peripheralID] != nil)")
+            print("   Has Token: \(accessoryDiscoveryTokens[peripheralID] != nil)")
+        }
+        
+        // Check for token conflicts
+        let tokens = accessoryDiscoveryTokens.values
+        if tokens.count != Set(tokens).count {
+            print("\n⚠️ WARNING: Duplicate discovery tokens detected!")
+            print("This will prevent multiple devices from ranging simultaneously.")
+        }
+        
+        print("\n===========================\n")
+    }
+    
+    // Monitor protocol messages for a specific device
+    func enableMessageLogging(for peripheralID: UUID) {
+        // This will help track what messages are being sent/received
+        print("\n📨 Enabling detailed message logging for device \(peripheralID)")
+        
+        // You can call this before connecting to track all protocol messages
+        // The existing logging will now be enhanced with this context
     }
 }

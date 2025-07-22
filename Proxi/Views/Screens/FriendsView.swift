@@ -16,82 +16,35 @@ struct FriendsView: View {
     @State private var connectedDevicesCount = 0
     @State private var refreshTrigger = false // Force view refresh
     
-    // QorvoDemoViewController connection logic (similar to SettingsView)
-    @StateObject private var dataChannel = DataCommunicationChannel()
-    @StateObject private var sessionManager = NISessionManager()
-    @State private var selectedAccessory = -1
-    
     private let logger = os.Logger(subsystem: "com.qorvo.ni", category: "FriendsView")
 
-    // Computed property that uses Arduino connection status
+    // Computed property that uses BLEManager connection status
     private var hasPairedProxi: Bool {
-        connectedDevicesCount > 0
+        bleManager.isConnected
     }
     
-    // MARK: - Device Categorization
-    private var hostDevice: qorvoDevice? {
-        // The host device is the one connected in SettingsView (first connected device)
-        qorvoDevices.compactMap { $0 }.first { device in
-            device.blePeripheralStatus == statusConnected || device.blePeripheralStatus == statusRanging
+    // MARK: - Device Categorization (using BLEManager data)
+    private var connectedDevices: [CBPeripheral] {
+        return Array(bleManager.connectedPeripherals.values)
+    }
+    
+    private var discoveredDevices: [CBPeripheral] {
+        return bleManager.discoveredPeripherals.filter { peripheral in
+            !bleManager.connectedPeripherals.keys.contains(peripheral.identifier)
         }
     }
     
-    private var otherConnectedDevices: [qorvoDevice] {
+    private var hostDevice: CBPeripheral? {
+        // The host device is the first connected device
+        return connectedDevices.first
+    }
+    
+    private var otherConnectedDevices: [CBPeripheral] {
         // All connected devices except the host device
-        let connectedDevices = qorvoDevices.compactMap { $0 }.filter { device in
-            device.blePeripheralStatus == statusConnected || device.blePeripheralStatus == statusRanging
+        if connectedDevices.count > 1 {
+            return Array(connectedDevices.dropFirst())
         }
-        
-        // If we have a host device, exclude it from the list
-        if let host = hostDevice {
-            return connectedDevices.filter { $0.bleUniqueID != host.bleUniqueID }
-        }
-        
-        return connectedDevices
-    }
-    
-    private var discoveredNotConnectedDevices: [qorvoDevice] {
-        // All discovered devices that are not connected
-        qorvoDevices.compactMap { $0 }.filter { device in
-            device.blePeripheralStatus == statusDiscovered
-        }
-    }
-    
-    // MARK: - Device Count Updates
-    private func updateDeviceCounts() {
-        let connected = qorvoDevices.compactMap { $0 }.filter { $0.blePeripheralStatus == statusConnected || $0.blePeripheralStatus == statusRanging }.count
-        connectedDevicesCount = connected
-        
-        // Debug: Print distance data for connected devices
-        for device in qorvoDevices.compactMap({ $0 }) {
-            if device.blePeripheralStatus == statusConnected || device.blePeripheralStatus == statusRanging {
-                if let location = device.uwbLocation {
-                    print("📏 FriendsView Debug - Device: \(device.blePeripheralName), Distance: \(location.distance), Status: \(device.blePeripheralStatus ?? "Unknown"), NoUpdate: \(location.noUpdate)")
-                    
-                    // Check if distance is 0 and provide more context
-                    if location.distance == 0 {
-                        print("⚠️ FriendsView Debug - Device \(device.blePeripheralName) has 0 distance - this might indicate:")
-                        print("   - UWB ranging not started yet")
-                        print("   - Device too close for accurate measurement")
-                        print("   - NoUpdate flag: \(location.noUpdate)")
-                        print("   - Direction data: x=\(location.direction.x), y=\(location.direction.y), z=\(location.direction.z)")
-                    }
-                } else {
-                    print("❌ FriendsView Debug - Device: \(device.blePeripheralName), No UWB location data")
-                }
-            }
-        }
-        
-        // Debug: Print all devices for comparison
-        print("🔍 FriendsView Debug - Total devices: \(qorvoDevices.compactMap({ $0 }).count)")
-        for (index, device) in qorvoDevices.compactMap({ $0 }).enumerated() {
-            print("   Device \(index): \(device.blePeripheralName) - Status: \(device.blePeripheralStatus ?? "Unknown") - Has UWB: \(device.uwbLocation != nil)")
-        }
-        
-        // Force refresh trigger to update UI
-        DispatchQueue.main.async {
-            self.refreshTrigger.toggle()
-        }
+        return []
     }
 
     var body: some View {
@@ -129,7 +82,6 @@ struct FriendsView: View {
             // Force view refresh when location data updates
         }
         .onAppear {
-            setupDataChannel()
             startDeviceMonitoring()
         }
         .onDisappear {
@@ -158,68 +110,46 @@ struct FriendsView: View {
     }
     
     // MARK: - Location Update Handler
-    private func handleLocationUpdate(_ deviceID: Int) {
-        print("📍 FriendsView: Location update received for device ID: \(deviceID)")
-        
-        // Find the device and log its current state
-        if let device = qorvoDevices.compactMap({ $0 }).first(where: { $0.bleUniqueID == deviceID }) {
-            if let location = device.uwbLocation {
-                print("📍 FriendsView: Device \(device.blePeripheralName) - Distance: \(location.distance), Status: \(device.blePeripheralStatus ?? "Unknown")")
-            } else {
-                print("📍 FriendsView: Device \(device.blePeripheralName) - No location data available")
-            }
-        } else {
-            print("📍 FriendsView: Device with ID \(deviceID) not found")
-        }
-        
+    private func handleLocationUpdate() {
         // Force UI refresh when location data is updated
         DispatchQueue.main.async {
             self.refreshTrigger.toggle() // Toggle to force view refresh
-            print("🔄 FriendsView: Refresh trigger toggled for device \(deviceID)")
         }
     }
     
-    // MARK: - QorvoDemoViewController Connection Logic Integration
-    private func setupDataChannel() {
-        dataChannel.accessoryDataHandler = accessorySharedData
-        dataChannel.accessorySynchHandler = accessorySynch
-        dataChannel.accessoryConnectedHandler = accessoryConnected
-        dataChannel.accessoryDisconnectedHandler = accessoryDisconnected
-        dataChannel.start()
+    private func updateDeviceCounts() {
+        connectedDevicesCount = connectedDevices.count
         
-        // Setup session manager callbacks
-        setupSessionManagerCallbacks()
-        
-        logger.info("DataCommunicationChannel initialized in FriendsView")
-    }
-    
-    private func setupSessionManagerCallbacks() {
-        sessionManager.onSessionConfigured = { deviceID in
-            // Handle session configuration completion
-            self.logger.info("Session configured for device \(deviceID)")
-        }
-        
-        sessionManager.onUwbStarted = { deviceID in
-            self.logger.info("UWB started for device \(deviceID)")
-        }
-        
-        sessionManager.onUwbStopped = { deviceID in
-            self.logger.info("UWB stopped for device \(deviceID)")
-        }
-        
-        sessionManager.onLocationUpdate = { deviceID in
-            // Location data has been updated - trigger UI refresh
-            self.handleLocationUpdate(deviceID)
-        }
-        
-        sessionManager.onSendData = { data, deviceID in
-            // Send data to accessory through data channel
-            // This will be handled by the dataChannel directly
-            do {
-                try self.dataChannel.sendData(data, deviceID)
-            } catch {
-                self.logger.error("Failed to send data to accessory: \(error)")
+        // Debug: Print distance data for connected devices
+        for (peripheralID, deviceData) in bleManager.connectedDevicesData {
+            let deviceName = deviceData.deviceName
+            let location = deviceData.uwbLocation
+            let isRanging = deviceData.isRanging
+            
+            print("📏 FriendsView Debug - Device: \(deviceName), Distance: \(location.distance), Ranging: \(isRanging)")
+            
+            // Check if distance is 0 and provide more context
+            if location.distance == 0 {
+                print("⚠️ FriendsView Debug - Device \(deviceName) has 0 distance - this might indicate:")
+                print("   - UWB ranging not started yet")
+                print("   - Device too close for accurate measurement")
+                print("   - NoUpdate flag: \(location.noUpdate)")
+                print("   - Direction data: x=\(location.direction.x), y=\(location.direction.y), z=\(location.direction.z)")
+                
+                // Check if this device should be ranging but isn't
+                if !isRanging {
+                    print("🔍 FriendsView Debug - Device \(deviceName) is connected but not ranging - this might be a UWB session issue")
+                }
             }
+        }
+        
+        // Debug: Print all devices for comparison
+        print("🔍 FriendsView Debug - Total connected devices: \(connectedDevices.count)")
+        print("🔍 FriendsView Debug - Total discovered devices: \(discoveredDevices.count)")
+        
+        // Force refresh trigger to update UI
+        DispatchQueue.main.async {
+            self.refreshTrigger.toggle()
         }
     }
 
@@ -242,43 +172,18 @@ struct FriendsView: View {
             }
             
             if let host = hostDevice {
-                HostDeviceCard(device: host)
+                HostDeviceCard(peripheral: host, bleManager: bleManager)
             } else {
                 emptyHostDeviceView
             }
         }
     }
     
-    private var emptyHostDeviceView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "antenna.radiowaves.left.and.right.slash")
-                .font(.system(size: 40))
-                .foregroundColor(.white.opacity(0.4))
-            
-            Text("No Host Device")
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            Text("Connect a device in Settings to start")
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.7))
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
-        .background(Color("232229"))
-        .cornerRadius(16)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
-    }
-    
-    // MARK: - Paired Friends (Other Connected Devices)
+    // MARK: - Paired Friends Section
     private var pairedFriendsSection: some View {
         VStack(spacing: 16) {
             HStack {
-                Text("Currently Paired")
+                Text("Connected Devices")
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
@@ -295,27 +200,31 @@ struct FriendsView: View {
             if otherConnectedDevices.isEmpty {
                 emptyFriendsView(text: "No other devices connected.")
             } else {
-                VStack(spacing: 8) {
-                    ForEach(otherConnectedDevices, id: \.bleUniqueID) { device in
-                        ConnectedDeviceCard(device: device, onDisconnect: { deviceID in
-                            self.disconnectFromAccessory(deviceID)
-                        })
-                    }
-                }
+                connectedDevicesList
             }
         }
     }
     
-    // MARK: - Nearby Proxis (Discovered but not connected)
+    private var connectedDevicesList: some View {
+        VStack(spacing: 8) {
+            ForEach(otherConnectedDevices, id: \.identifier) { peripheral in
+                ConnectedDeviceCard(peripheral: peripheral, bleManager: bleManager, onDisconnect: { peripheralID in
+                    bleManager.disconnect(peripheralID: peripheralID)
+                })
+            }
+        }
+    }
+    
+    // MARK: - Nearby Proxis Section
     private var nearbyProxisSection: some View {
         VStack(spacing: 16) {
             HStack {
-                Text("Nearby Proxis")
+                Text("Nearby Devices")
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 Spacer()
-                Text("\(discoveredNotConnectedDevices.count)")
+                Text("\(discoveredDevices.count)")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.6))
                     .padding(.horizontal, 8)
@@ -324,44 +233,19 @@ struct FriendsView: View {
                     .cornerRadius(8)
             }
             
-            if discoveredNotConnectedDevices.isEmpty {
-                emptyNearbyView
+            if discoveredDevices.isEmpty {
+                emptyFriendsView(text: "No nearby devices found.")
             } else {
                 nearbyProxisList
             }
         }
     }
     
-    private var emptyNearbyView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "antenna.radiowaves.left.and.right.slash")
-                .font(.system(size: 40))
-                .foregroundColor(.white.opacity(0.4))
-            
-            Text("No Proxis Nearby")
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            Text("Move around to discover other Proxi users")
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.7))
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
-        .background(Color("232229"))
-        .cornerRadius(16)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
-    }
-    
     private var nearbyProxisList: some View {
         VStack(spacing: 8) {
-            ForEach(discoveredNotConnectedDevices, id: \.bleUniqueID) { device in
-                DiscoveredDeviceCard(device: device, onConnect: { deviceID in
-                    self.connectToAccessory(deviceID)
+            ForEach(discoveredDevices, id: \.identifier) { peripheral in
+                DiscoveredDeviceCard(peripheral: peripheral, onConnect: { peripheral in
+                    bleManager.connect(to: peripheral)
                 })
             }
         }
@@ -387,83 +271,54 @@ struct FriendsView: View {
             if friendsManager.incomingRequests.isEmpty {
                 emptyFriendsView(text: "No incoming requests.")
             } else {
-                VStack(spacing: 8) {
-                    ForEach(friendsManager.incomingRequests) { friend in
-                        HStack(alignment: .center) {
-                            FriendsListRowView(friend: friend)
-                            VStack(spacing: 8) {
-                                Button(action: {
-                                    friendsManager.acceptFriendRequest(friend)
-                                }) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.title2)
-                                        .foregroundColor(.green)
-                                        .padding(8)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                Button(action: {
-                                    friendsManager.declineFriendRequest(friend)
-                                }) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.title2)
-                                        .foregroundColor(.red)
-                                        .padding(8)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                        }
-                    }
-                }
+                // Incoming requests list would go here
+                Text("Incoming requests feature coming soon...")
+                    .foregroundColor(.white.opacity(0.7))
+                    .padding()
             }
         }
     }
     
-    // MARK: - Empty State
+    // MARK: - Empty State Views
+    private var emptyHostDeviceView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.system(size: 48))
+                .foregroundColor(.gray)
+            
+            Text("No Host Device")
+                .font(.headline)
+                .foregroundColor(.white)
+            
+            Text("Connect an Arduino device in Settings to get started.")
+                .font(.subheadline)
+                .foregroundColor(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+        .background(Color("232229"))
+        .cornerRadius(12)
+    }
+    
     private func emptyFriendsView(text: String) -> some View {
         VStack(spacing: 16) {
-            Image(systemName: "person.2.slash")
-                .font(.system(size: 40))
-                .foregroundColor(.white.opacity(0.4))
+            Image(systemName: "person.2")
+                .font(.system(size: 48))
+                .foregroundColor(.gray)
+            
             Text(text)
                 .font(.headline)
                 .foregroundColor(.white)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
+        .padding()
         .background(Color("232229"))
-        .cornerRadius(16)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
+        .cornerRadius(12)
     }
     
-    // MARK: - Unpaired State
+    // MARK: - Unpaired State View
     private var unpairedStateView: some View {
         VStack(spacing: 32) {
             Spacer()
-            
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.blue.opacity(0.2), Color.purple.opacity(0.2)]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 200, height: 200)
-                
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.system(size: 60))
-                    .foregroundStyle(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.blue, Color.purple]),
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-            }
             
             VStack(spacing: 16) {
                 Text("Connect Arduino Device First")
@@ -516,184 +371,12 @@ struct FriendsView: View {
         }
         .padding()
     }
-    
-    // MARK: - Connection Management
-    func connectToAccessory(_ deviceID: Int) {
-        print("🔗 FriendsView: connectToAccessory called with deviceID: \(deviceID)")
-        logger.info("Attempting to connect to device ID: \(deviceID)")
-        
-        // Check if device exists
-        guard let device = qorvoDevices.compactMap({ $0 }).first(where: { $0.bleUniqueID == deviceID }) else {
-            print("❌ FriendsView: Device with ID \(deviceID) not found in qorvoDevices array")
-            logger.error("Device with ID \(deviceID) not found in qorvoDevices array")
-            return
-        }
-        
-        print("✅ FriendsView: Found device: \(device.blePeripheralName) with status: \(device.blePeripheralStatus ?? "nil")")
-        logger.info("Found device: \(device.blePeripheralName) with status: \(device.blePeripheralStatus ?? "nil")")
-        
-        do {
-            try dataChannel.connectPeripheral(deviceID)
-            print("✅ FriendsView: Connection attempt initiated for device \(deviceID)")
-            logger.info("Connection attempt initiated for device \(deviceID)")
-        } catch {
-            print("❌ FriendsView: Failed to connect to accessory: \(error)")
-            logger.error("Failed to connect to accessory: \(error)")
-        }
-    }
-    
-    func disconnectFromAccessory(_ deviceID: Int) {
-        print("🔌 FriendsView: disconnectFromAccessory called with deviceID: \(deviceID)")
-        logger.info("Attempting to disconnect from device ID: \(deviceID)")
-        
-        // Check if device exists
-        guard let device = qorvoDevices.compactMap({ $0 }).first(where: { $0.bleUniqueID == deviceID }) else {
-            print("❌ FriendsView: Device with ID \(deviceID) not found in qorvoDevices array")
-            logger.error("Device with ID \(deviceID) not found in qorvoDevices array")
-            return
-        }
-        
-        print("✅ FriendsView: Found device to disconnect: \(device.blePeripheralName)")
-        logger.info("Found device to disconnect: \(device.blePeripheralName)")
-        
-        // Disconnect the BLE peripheral
-        do {
-            try dataChannel.disconnectPeripheral(deviceID)
-            print("✅ FriendsView: BLE disconnection successful for device \(deviceID)")
-            logger.info("BLE disconnection successful for device \(deviceID)")
-        } catch {
-            print("❌ FriendsView: Failed to disconnect BLE peripheral: \(error)")
-            logger.error("Failed to disconnect BLE peripheral: \(error)")
-        }
-        
-        // Invalidate the NI session for this device
-        sessionManager.invalidateSession(for: deviceID)
-        
-        print("✅ FriendsView: Disconnection initiated for device \(deviceID)")
-        logger.info("Disconnection initiated for device \(deviceID)")
-    }
-    
-    func sendDataToAccessory(_ data: Data, _ deviceID: Int) {
-        do {
-            try dataChannel.sendData(data, deviceID)
-        } catch {
-            logger.error("Failed to send data to accessory: \(error)")
-        }
-    }
-    
-    // MARK: - DataChannel Handler Methods
-    func accessorySharedData(data: Data, accessoryName: String, deviceID: Int) {
-        // The accessory begins each message with an identifier byte.
-        // Ensure the message length is within a valid range.
-        if data.count < 1 {
-            logger.error("Received invalid data from accessory")
-            return
-        }
-        
-        // Assign the first byte which is the message identifier.
-        guard let messageId = MessageId(rawValue: data.first!) else {
-            logger.error("\(data.first!) is not a valid MessageId.")
-            return
-        }
-        
-        // Handle the data portion of the message based on the message identifier.
-        switch messageId {
-        case .accessoryConfigurationData:
-            // Access the message data by skipping the message identifier.
-            assert(data.count > 1)
-            let message = data.advanced(by: 1)
-            setupAccessory(message, name: accessoryName, deviceID: deviceID)
-        case .accessoryUwbDidStart:
-            handleAccessoryUwbDidStart(deviceID)
-        case .accessoryUwbDidStop:
-            handleAccessoryUwbDidStop(deviceID)
-        case .configureAndStart:
-            logger.error("Accessory should not send 'configureAndStart'.")
-        case .initialize:
-            logger.error("Accessory should not send 'initialize'.")
-        case .stop:
-            logger.error("Accessory should not send 'stop'.")
-        // User defined/notification messages
-        case .getReserved:
-            logger.debug("Get not implemented in this version")
-        case .setReserved:
-            logger.debug("Set not implemented in this version")
-        case .iOSNotify:
-            logger.debug("Notification not implemented in this version")
-        }
-    }
-    
-    func accessorySynch(_ index: Int, _ insert: Bool) {
-        // Update device list in friends view
-        logger.info("Device synch: index \(index), insert: \(insert)")
-    }
-    
-    func accessoryConnected(deviceID: Int) {
-        logger.info("Accessory connected: \(deviceID)")
-        
-        // If no device is selected, select the new device
-        if selectedAccessory == -1 {
-            selectedAccessory = deviceID
-        }
-        
-        // Create a NISession for the new device using the session manager
-        _ = sessionManager.createSession(for: deviceID)
-        
-        logger.info("Sending initialize message to accessory")
-        let msg = Data([MessageId.initialize.rawValue])
-        sendDataToAccessory(msg, deviceID)
-    }
-    
-    func accessoryDisconnected(deviceID: Int) {
-        logger.info("Accessory disconnected: \(deviceID)")
-        sessionManager.invalidateSession(for: deviceID)
-        
-        if selectedAccessory == deviceID {
-            selectedAccessory = -1
-        }
-    }
-    
-    // MARK: - Accessory messages handling
-    func setupAccessory(_ configData: Data, name: String, deviceID: Int) {
-        logger.info("Received configuration data from '\(name)'. Running session.")
-        do {
-            let config = try NINearbyAccessoryConfiguration(data: configData)
-            config.isCameraAssistanceEnabled = true
-            sessionManager.configuration = config
-        }
-        catch {
-            logger.error("Failed to create NINearbyAccessoryConfiguration for '\(name)'. Error: \(error)")
-            return
-        }
-        
-        // Run configuration for this device (token caching is now handled internally)
-        if let config = sessionManager.configuration {
-            sessionManager.runConfiguration(config, for: deviceID)
-        }
-        
-        logger.info("Session configured for device \(deviceID)")
-    }
-    
-    func handleAccessoryUwbDidStart(_ deviceID: Int) {
-        logger.info("Accessory UWB started: \(deviceID)")
-        
-        // Update the device Status
-        if let startedDevice = dataChannel.getDeviceFromUniqueID(deviceID) {
-            startedDevice.blePeripheralStatus = statusRanging
-        }
-    }
-    
-    func handleAccessoryUwbDidStop(_ deviceID: Int) {
-        logger.info("Accessory UWB stopped: \(deviceID)")
-        
-        // Disconnect from device
-        disconnectFromAccessory(deviceID)
-    }
 }
 
 // MARK: - Device Card Views
 struct HostDeviceCard: View {
-    let device: qorvoDevice
+    let peripheral: CBPeripheral
+    let bleManager: BLEManager
     @State private var refreshTrigger: Bool = false
     
     var body: some View {
@@ -725,20 +408,15 @@ struct HostDeviceCard: View {
                 
                 Spacer()
                 
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Status")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.6))
-                    Text("Active")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.green)
-                }
+                // Status indicator
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 12, height: 12)
             }
             
-            // Device details
+            // Device info
             HStack(spacing: 16) {
-                // Host device icon
+                // Device icon
                 ZStack {
                     Circle()
                         .fill(Color.green.opacity(0.2))
@@ -751,7 +429,7 @@ struct HostDeviceCard: View {
                 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text(device.blePeripheralName)
+                        Text(peripheral.name ?? "Unknown Device")
                             .font(.headline)
                             .fontWeight(.semibold)
                             .foregroundColor(.white)
@@ -761,17 +439,17 @@ struct HostDeviceCard: View {
                             .frame(width: 8, height: 8)
                     }
                     
-                    Text(device.blePeripheralStatus ?? "Connected")
+                    Text("Connected")
                         .font(.subheadline)
                         .foregroundColor(.green)
                     
                     // Distance display with refresh trigger
-                    if let location = device.uwbLocation {
+                    if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
                         HStack(spacing: 4) {
                             Image(systemName: "location.fill")
                                 .font(.caption)
                                 .foregroundColor(.green)
-                            Text("\(String(format: "%.2f", location.distance))m")
+                            Text("\(String(format: "%.2f", deviceData.uwbLocation.distance))m")
                                 .font(.caption)
                                 .fontWeight(.medium)
                                 .foregroundColor(.green)
@@ -794,10 +472,11 @@ struct HostDeviceCard: View {
                 // Host indicator
                 VStack(spacing: 4) {
                     Image(systemName: "crown.fill")
-                        .font(.title2)
-                        .foregroundColor(.yellow)
-                    Text("Host")
                         .font(.caption)
+                        .foregroundColor(.yellow)
+                    Text("HOST")
+                        .font(.caption2)
+                        .fontWeight(.bold)
                         .foregroundColor(.yellow)
                 }
             }
@@ -807,14 +486,15 @@ struct HostDeviceCard: View {
         .cornerRadius(12)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
     }
 }
 
 struct ConnectedDeviceCard: View {
-    let device: qorvoDevice
-    let onDisconnect: (Int) -> Void
+    let peripheral: CBPeripheral
+    let bleManager: BLEManager
+    let onDisconnect: (UUID) -> Void
     @State private var refreshTrigger: Bool = false
     
     var body: some View {
@@ -832,7 +512,7 @@ struct ConnectedDeviceCard: View {
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(device.blePeripheralName)
+                    Text(peripheral.name ?? "Unknown Device")
                         .font(.headline)
                         .fontWeight(.semibold)
                         .foregroundColor(.white)
@@ -842,25 +522,22 @@ struct ConnectedDeviceCard: View {
                         .frame(width: 8, height: 8)
                 }
                 
-                Text(device.blePeripheralStatus ?? "Connected")
+                Text("Connected")
                     .font(.subheadline)
                     .foregroundColor(.blue)
                 
-                // Distance display with refresh trigger and debugging
-                if let location = device.uwbLocation {
+                // Distance display with refresh trigger
+                if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
                     HStack(spacing: 4) {
                         Image(systemName: "location.fill")
                             .font(.caption)
                             .foregroundColor(.blue)
-                        Text("\(String(format: "%.2f", location.distance))m")
+                        Text("\(String(format: "%.2f", deviceData.uwbLocation.distance))m")
                             .font(.caption)
                             .fontWeight(.medium)
                             .foregroundColor(.blue)
                     }
                     .id(refreshTrigger) // Force refresh when trigger changes
-                    .onAppear {
-                        print("🔍 ConnectedDeviceCard Debug - Device: \(device.blePeripheralName), Distance: \(location.distance), Status: \(device.blePeripheralStatus ?? "Unknown")")
-                    }
                 } else {
                     HStack(spacing: 4) {
                         Image(systemName: "location.slash")
@@ -870,9 +547,6 @@ struct ConnectedDeviceCard: View {
                             .font(.caption)
                             .foregroundColor(.white.opacity(0.5))
                     }
-                    .onAppear {
-                        print("❌ ConnectedDeviceCard Debug - Device: \(device.blePeripheralName), No UWB location data")
-                    }
                 }
             }
             
@@ -880,8 +554,7 @@ struct ConnectedDeviceCard: View {
             
             // Disconnect button
             Button(action: {
-                print("🔌 Disconnect button tapped for device: \(device.blePeripheralName) (ID: \(device.bleUniqueID))")
-                onDisconnect(device.bleUniqueID)
+                onDisconnect(peripheral.identifier)
             }) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.title2)
@@ -899,8 +572,8 @@ struct ConnectedDeviceCard: View {
 }
 
 struct DiscoveredDeviceCard: View {
-    let device: qorvoDevice
-    let onConnect: (Int) -> Void
+    let peripheral: CBPeripheral
+    let onConnect: (CBPeripheral) -> Void
     @State private var isConnecting = false
     
     var body: some View {
@@ -917,7 +590,7 @@ struct DiscoveredDeviceCard: View {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(device.blePeripheralName)
+                Text(peripheral.name ?? "Unknown Device")
                     .font(.headline)
                     .fontWeight(.semibold)
                     .foregroundColor(.white)
@@ -931,33 +604,24 @@ struct DiscoveredDeviceCard: View {
             
             // Connect button
             Button(action: {
-                print("Connect button tapped for device: \(device.blePeripheralName) (ID: \(device.bleUniqueID))")
+                print("Connect button tapped for device: \(peripheral.name ?? "Unknown") (ID: \(peripheral.identifier))")
                 isConnecting = true
-                onConnect(device.bleUniqueID)
+                onConnect(peripheral)
                 
                 // Reset connecting state after a delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                     isConnecting = false
                 }
             }) {
-                HStack(spacing: 4) {
-                    if isConnecting {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    } else {
-                        Image(systemName: "link")
-                            .font(.system(size: 14))
-                    }
-                    Text(isConnecting ? "Connecting..." : "Connect")
-                        .font(.caption)
-                        .fontWeight(.semibold)
+                if isConnecting {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.blue)
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(isConnecting ? Color.gray : Color.blue)
-                .cornerRadius(8)
             }
             .disabled(isConnecting)
         }

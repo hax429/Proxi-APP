@@ -34,22 +34,9 @@
 		A9F841D22E2879A200B03B96 /* ProxiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProxiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		A9548A6A2E294AC300AB5F7E /* Exceptions for "Proxi" folder in "Proxi" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = A9F841B92E2879A000B03B96 /* Proxi */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A9F841BC2E2879A000B03B96 /* Proxi */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				A9548A6A2E294AC300AB5F7E /* Exceptions for "Proxi" folder in "Proxi" target */,
-			);
 			path = Proxi;
 			sourceTree = "<group>";
 		};
@@ -418,14 +405,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Proxi/Proxi.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Proxi/Core/Proxi.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XUR3432T6M;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Proxi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Proxi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This app needs Bluetooth";
@@ -465,14 +451,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Proxi/Proxi.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Proxi/Core/Proxi.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XUR3432T6M;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Proxi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Proxi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This app needs Bluetooth";

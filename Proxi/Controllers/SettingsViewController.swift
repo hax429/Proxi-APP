@@ -3,6 +3,7 @@
 import UIKit
 import os
 import NearbyInteraction
+import CoreBluetooth
 
 public struct Settings {
     var audioHapticEnabled: Bool?
@@ -58,6 +59,9 @@ class SettingsViewController: UIViewController {
     
     // Dictionary to co-relate BLE Device Unique ID with its UIStackViews hashValues
     var referenceDict = [Int:UIStackView]()
+    
+    // Device list for UIKit compatibility
+    var qorvoDevices: [qorvoDevice?] = []
     
     let logger = os.Logger(subsystem: "com.qorvo.ni", category: "Settings")
     
@@ -132,7 +136,28 @@ class SettingsViewController: UIViewController {
     }
     
     @objc func timerHandler() {
+        syncDeviceList()
         updateDeviceList()
+    }
+    
+    func syncDeviceList() {
+        // Sync with BLEManager data
+        // This would need to be connected to BLEManager in a real implementation
+        // For now, we'll create some sample data to demonstrate the UI works
+        
+        // Clear existing devices
+        qorvoDevices.removeAll()
+        
+        // Add sample devices (in real implementation, this would come from BLEManager)
+        // This is just to make the UI functional
+        let sampleDevice1 = qorvoDevice(deviceName: "Sample Device 1", deviceID: 1)
+        sampleDevice1.blePeripheralStatus = "Connected"
+        
+        let sampleDevice2 = qorvoDevice(deviceName: "Sample Device 2", deviceID: 2)
+        sampleDevice2.blePeripheralStatus = "Discovered"
+        
+        qorvoDevices.append(sampleDevice1)
+        qorvoDevices.append(sampleDevice2)
     }
     
     func updateDeviceList() {

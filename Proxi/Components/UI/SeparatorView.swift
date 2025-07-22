@@ -62,7 +62,7 @@ class SeparatorView: UIView {
         font: UIFont = UIFont.systemFont(ofSize: 16, weight: .medium),
         textColor: UIColor = .black,
         background: UIColor = .qorvoGray05,
-        height: CGFloat = SEPARATOR_VIEW_HEIGHT_CONSTRAINT,
+        height: CGFloat = DesignConstraints.SEPARATOR_VIEW_HEIGHT_CONSTRAINT,
         leadingPadding: CGFloat = 22,
         center: Bool = false
     ) {

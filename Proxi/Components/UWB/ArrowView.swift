@@ -111,12 +111,12 @@ class ArrowView: UIView {
         NSLayoutConstraint.activate([
             infoLabel.topAnchor.constraint(equalTo: topAnchor, constant: 10),
             infoLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            arrowImgView.heightAnchor.constraint(equalToConstant: ARROW_IMAGE_HEIGHT_CONSTRAINT),
-            arrowImgView.widthAnchor.constraint(equalToConstant: ARROW_IMAGE_WIDTH_CONSTRAINT),
+            arrowImgView.heightAnchor.constraint(equalToConstant: DesignConstraints.ARROW_IMAGE_HEIGHT_CONSTRAINT),
+            arrowImgView.widthAnchor.constraint(equalToConstant: DesignConstraints.ARROW_IMAGE_WIDTH_CONSTRAINT),
             arrowImgView.centerXAnchor.constraint(equalTo: centerXAnchor),
             arrowImgView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            scanning.heightAnchor.constraint(equalToConstant: SCANNING_SIDE_CONSTRAINT),
-            scanning.widthAnchor.constraint(equalToConstant: SCANNING_SIDE_CONSTRAINT),
+            scanning.heightAnchor.constraint(equalToConstant: DesignConstraints.SCANNING_SIDE_CONSTRAINT),
+            scanning.widthAnchor.constraint(equalToConstant: DesignConstraints.SCANNING_SIDE_CONSTRAINT),
             scanning.centerXAnchor.constraint(equalTo: centerXAnchor),
             scanning.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
@@ -126,7 +126,7 @@ class ArrowView: UIView {
             topAnchor.constraint(equalTo: topAnchor),
             leadingAnchor.constraint(equalTo: leadingAnchor),
             trailingAnchor.constraint(equalTo: trailingAnchor),
-            heightAnchor.constraint(equalToConstant: ARROW_VIEW_HEIGHT_CONSTRAINT)
+            heightAnchor.constraint(equalToConstant: DesignConstraints.ARROW_VIEW_HEIGHT_CONSTRAINT)
         ])
         
         backgroundColor = .white

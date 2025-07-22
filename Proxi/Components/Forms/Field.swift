@@ -1,7 +1,7 @@
 /*
- * @file      DeviceView.swift
+ * @file      Field.swift
  *
- * @brief     Implementation of the top text field, where the selected device is shown.
+ * @brief     Field class for each parameter
  *
  * @author    Decawave Applications
  *
@@ -49,35 +49,38 @@
  *
  */
 
-import Foundation
 import UIKit
 
-class DeviceView: UIView {
+class Field: UIView {
     // Info fields
+    let fieldIcon: UIImageView
+    let valueText: UITextField
     let titleText: UITextField
-    let deviceName: UITextField
     // Stack View to organise
     let verticalStackView: UIStackView
     
-    init() {
-        // Initializing subviews
+    init(image: UIImage?, fieldTitle: String) {
+        // Creating subviews
+        fieldIcon = UIImageView(image: image)
+        fieldIcon.contentMode = .scaleAspectFit
+        fieldIcon.translatesAutoresizingMaskIntoConstraints = false
+        
+        valueText = UITextField(frame: .zero)
+        valueText.translatesAutoresizingMaskIntoConstraints = false
+        valueText.font = UIFont.systemFont(ofSize: 22, weight: .medium)
+        valueText.contentVerticalAlignment = .bottom
+        valueText.textAlignment = .center
+        valueText.textColor = .black
+        valueText.text = "-"
+        
         titleText = UITextField(frame: .zero)
         titleText.translatesAutoresizingMaskIntoConstraints = false
         titleText.font = UIFont.systemFont(ofSize: 14, weight: .regular)
-        titleText.contentVerticalAlignment = .bottom
         titleText.textAlignment = .center
-        titleText.textColor = .qorvoGray50
-        titleText.text = "SelectedAccessory".localized
+        titleText.textColor = .qorvoGray33
+        titleText.text = fieldTitle
         
-        deviceName = UITextField(frame: .zero)
-        deviceName.translatesAutoresizingMaskIntoConstraints = false
-        deviceName.font = UIFont.systemFont(ofSize: 16, weight: .medium)
-        deviceName.contentVerticalAlignment = .center
-        deviceName.textAlignment = .center
-        deviceName.textColor = .black
-        deviceName.text = "NotConnected".localized.uppercased()
-        
-        verticalStackView = UIStackView(arrangedSubviews: [titleText, deviceName])
+        verticalStackView = UIStackView(arrangedSubviews: [fieldIcon, valueText, titleText])
         verticalStackView.translatesAutoresizingMaskIntoConstraints = false
         verticalStackView.axis = .vertical
         verticalStackView.distribution = .equalSpacing
@@ -85,31 +88,60 @@ class DeviceView: UIView {
         
         super.init(frame: .zero)
         
-        // Add the stack view to the superview
+        // Add the stack view to the subview
         addSubview(verticalStackView)
         
-        // Set up the stack view's constraints
+        // Set up the stack view's constraints with priorities to avoid conflicts
+        let iconWidthConstraint = fieldIcon.widthAnchor.constraint(equalToConstant: DesignConstraints.FIELD_ICON_SIDE_CONSTRAINT)
+        iconWidthConstraint.priority = UILayoutPriority(999) // High priority but not required
+        
+        let iconHeightConstraint = fieldIcon.heightAnchor.constraint(equalToConstant: DesignConstraints.FIELD_ICON_SIDE_CONSTRAINT)
+        iconHeightConstraint.priority = UILayoutPriority(999) // High priority but not required
+        
+        let valueHeightConstraint = valueText.heightAnchor.constraint(equalToConstant: DesignConstraints.VALUE_TEXT_HEIGHT_CONSTRAINT)
+        valueHeightConstraint.priority = UILayoutPriority(999) // High priority but not required
+        
+        let titleHeightConstraint = titleText.heightAnchor.constraint(equalToConstant: DesignConstraints.TITLE_TEXT_HEIGHT_CONSTRAINT)
+        titleHeightConstraint.priority = UILayoutPriority(999) // High priority but not required
+        
         NSLayoutConstraint.activate([
+            fieldIcon.centerXAnchor.constraint(equalTo: centerXAnchor),
+            iconWidthConstraint,
+            iconHeightConstraint,
+            
+            valueText.centerXAnchor.constraint(equalTo: centerXAnchor),
+            valueHeightConstraint,
+            
             titleText.centerXAnchor.constraint(equalTo: centerXAnchor),
-            titleText.heightAnchor.constraint(equalToConstant: DEVICE_VIEW_HEIGHT_CONSTRAINT),
+            titleHeightConstraint,
             
-            deviceName.centerXAnchor.constraint(equalTo: centerXAnchor),
-            deviceName.heightAnchor.constraint(equalToConstant: DEVICE_VIEW_HEIGHT_CONSTRAINT),
-            
-            verticalStackView.topAnchor.constraint(equalTo: topAnchor),
+            verticalStackView.topAnchor.constraint(equalTo: topAnchor, constant: 20),
             verticalStackView.leadingAnchor.constraint(equalTo: leadingAnchor),
             verticalStackView.trailingAnchor.constraint(equalTo: trailingAnchor),
             verticalStackView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
         
-        backgroundColor = .white
+        // Set content compression resistance and hugging priorities
+        fieldIcon.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        fieldIcon.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
+        fieldIcon.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        fieldIcon.setContentHuggingPriority(.defaultHigh, for: .vertical)
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
     
-    func setDeviceName(_ newDeviceName: String) {
-        deviceName.text = newDeviceName
+    func setValue(_ newValue: String) {
+        valueText.text = newValue
+    }
+    
+    func setDisable(_ disable: Bool) {
+        if (disable) {
+            valueText.textColor = .lightGray
+        }
+        else {
+            valueText.textColor = .black
+        }
     }
 }

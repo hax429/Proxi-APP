@@ -1,7 +1,7 @@
 /*
- * @file      DesignConstraints.swift
+ * @file      WorldView.swift
  *
- * @brief     Constants GUI constraints declared from the Figma design.
+ * @brief     Simple AR View Class, set to work with NI Sessions (Camera Assistance)
  *
  * @author    Decawave Applications
  *
@@ -49,32 +49,68 @@
  *
  */
 
-// Constraints extracted from the app design
-let ACCESSORY_TABLE_HEIGHT_CONSTRAINT = 261.0
-let ACCESSORY_TABLE_ROW_HEIGHT_CONSTRAINT = 87.0
+import Foundation
+import ARKit
+import RealityKit
 
-let DEVICE_VIEW_HEIGHT_CONSTRAINT = 52.0
+class WorldView: ARView {
+    
+    let arConfig = ARWorldTrackingConfiguration()
+    let anchor = AnchorEntity(world: SIMD3(x: 0, y: 0, z: 0))
+    var entityDict = [Int:ModelEntity]()
+    let pinShape = MeshResource.generateSphere(radius: 0.05)
+    let material = SimpleMaterial(color: .yellow, isMetallic: false)
+    
+    required init(frame: CGRect) {
+        // Set/start AR Session to provide camera assistance to new NI Sessions
+        arConfig.worldAlignment = .gravity
+        arConfig.isCollaborationEnabled = false
+        arConfig.userFaceTrackingEnabled = false
+        arConfig.initialWorldMap = nil
+        
+        super.init(frame: .zero)
+        
+        // Set/start the AR Session. This AR Session will be shared with NISessions
+        session = ARSession()
+        session.delegate = self
+        session.run(arConfig)
+        scene.addAnchor(anchor)
+        
+        isHidden = true
+        contentMode = .scaleToFill
+        
+        // Set up the parent view's constraints
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: DesignConstraints.WORLD_VIEW_HEIGHT_CONSTRAINT)
+        ])
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    func insertEntity(_ deviceID: Int) {
+        // Create a new entity include ie to the anchor
+        entityDict[deviceID] = ModelEntity(mesh: pinShape, materials: [material])
+        entityDict[deviceID]!.position = [0, 0, 100]
+        anchor.addChild(entityDict[deviceID]!)
+    }
+    
+    func removeEntity(_ deviceID: Int) {
+        // Remove entity and delete etityDict entry
+        anchor.removeChild(entityDict[deviceID]!)
+        entityDict.removeValue(forKey: deviceID)
+    }
+    
+    func updateEntityPosition(_ deviceID: Int,_ transform: simd_float4x4) {
+        entityDict[deviceID]!.transform.matrix = transform
+    }
+    
+}
 
-let ACTION_BUTTON_WIDTH_CONSTRAINT = 160.0
-let CONNECTING_SIDE_CONSTRAINT = 24.0
-let BOTTOM_BAR_HEIGHT_CONSTRAINT = 1.0
-let BOTTOM_BAR_WIDTH_CONSTRAINT = 370.0
-let PIPE_SIDE_CONSTRAINT = 18.0
-let MINI_ARROW_SIDE_CONSTRAINT = 18.0
-let MINI_LOCATION_WIDTH_CONSTRAINT = 160.0
-let DISTANCE_LABEL_WIDTH_CONSTRAINT = 52.0
-let AZIMUTH_LABEL_WIDTH_CONSTRAINT = 52.0
+// MARK: - `ARSessionDelegate`.
 
-let ARROW_VIEW_HEIGHT_CONSTRAINT = 228.0
-let ARROW_IMAGE_HEIGHT_CONSTRAINT = 164.0
-let ARROW_IMAGE_WIDTH_CONSTRAINT = 202.0
-let SCANNING_SIDE_CONSTRAINT = 44.0
-
-let FIELD_ICON_SIDE_CONSTRAINT = 22.0
-let VALUE_TEXT_HEIGHT_CONSTRAINT = 26.0
-let TITLE_TEXT_HEIGHT_CONSTRAINT = 14.0
-let LOCATION_FIELD_HEIGHT_CONSTRAINT = 100.0
-
-let SEPARATOR_VIEW_HEIGHT_CONSTRAINT = 52.0
-
-let WORLD_VIEW_HEIGHT_CONSTRAINT = 300.0
+extension WorldView: ARSessionDelegate {
+    
+}

@@ -4,6 +4,10 @@
 //
 //  Created by Claude on 7/21/25.
 //
+//  UWB Compass and Ranging Display Controller
+//  This file contains the main UWB interface for displaying real-time ranging data,
+//  compass direction, and device management functionality.
+//
 
 import SwiftUI
 import UIKit
@@ -14,34 +18,72 @@ import CoreBluetooth
 import CoreLocation
 import simd
 
-// MARK: - Modern UIKit-based QorvoView
+// MARK: - QorvoView - Main UWB Interface
+/**
+ * QorvoView - Ultra-Wideband Compass and Ranging Display
+ *
+ * This is the primary SwiftUI view for displaying UWB ranging data in a compass format.
+ * It integrates UIKit components for advanced UWB visualization and provides
+ * real-time distance, direction, and elevation information.
+ *
+ * ## Key Features:
+ * - Real-time UWB ranging display
+ * - Interactive compass with directional arrows
+ * - Multi-device support and switching
+ * - Device heading integration
+ * - Calibration controls for accuracy
+ * - Debug mode with detailed information
+ *
+ * ## Architecture:
+ * - SwiftUI wrapper around UIKit UWB components
+ * - Environment object integration for BLE management
+ * - State management for device selection and calibration
+ * - Location services integration for device heading
+ *
+ * ## Usage:
+ * ```swift
+ * QorvoView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
+ *     .environmentObject(bleManager)
+ * ```
+ *
+ * ## Multi-Device Support:
+ * - Displays connected devices in a compact selector
+ * - Allows switching between multiple UWB devices
+ * - Maintains individual device data and calibration
+ * - Shows device-specific ranging information
+ */
 struct QorvoView: View {
+    
+    // MARK: - Environment Objects
     @Binding var selectedTab: Int
     @EnvironmentObject var bleManager: BLEManager
     @EnvironmentObject var friendsManager: FriendsManager
     @Binding var isSidebarOpen: Bool
+    
+    // MARK: - Device Management State
     @State private var selectedDeviceIndex: Int = 0
-    @State private var connectedDevicesList: [qorvoDevice] = []
+    @State private var connectedDevicesList: [CBPeripheral] = []
     @State private var showDebugWindow = false
     @State private var tapCount = 0
     
-    // Direction and location tracking
-    @State private var rotationAngle: Double = 0
-    @State private var elevation: Int = 0
-    @State private var directionCalibrationOffset: Double = 0
-    @State private var showCalibrationControls = false
-    @State private var locationManager = CLLocationManager()
-    @State private var deviceHeading: Double = 0
+    // MARK: - Direction and Location Tracking
+    @State private var rotationAngle: Double = 0          // Compass rotation angle
+    @State private var elevation: Int = 0                 // Elevation angle
+    @State private var directionCalibrationOffset: Double = 0  // Calibration offset
+    @State private var showCalibrationControls = false    // Calibration UI visibility
+    @State private var locationManager = CLLocationManager()   // Location services
+    @State private var deviceHeading: Double = 0          // Device magnetic heading
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Main content with UIKit integration
+                // Main UWB content with UIKit integration
                 if let device = currentDevice {
                     ModernQorvoUIView(
-                        device: device,
+                        peripheral: device,
+                        deviceData: currentDeviceData,
                         rotationAngle: $rotationAngle,
                         elevation: $elevation,
                         deviceHeading: $deviceHeading,
@@ -60,7 +102,7 @@ struct QorvoView: View {
                     NoDeviceConnectedView(selectedTab: $selectedTab)
                 }
                 
-                // Multiple device selector if needed
+                // Multiple device selector for multi-device scenarios
                 if connectedDevices.count > 1 {
                     CompactDeviceSelectorView(
                         devices: connectedDevices,
@@ -77,6 +119,7 @@ struct QorvoView: View {
         .onAppear {
             setupLocationManager()
             
+            // Listen for device heading updates
             NotificationCenter.default.addObserver(
                 forName: NSNotification.Name("DeviceHeadingUpdated"),
                 object: nil,
@@ -90,16 +133,28 @@ struct QorvoView: View {
     }
     
     // MARK: - Computed Properties
-    private var connectedDevices: [qorvoDevice] {
-        qorvoDevices.compactMap { $0 }.filter { device in
-            device.blePeripheralStatus == statusConnected || device.blePeripheralStatus == statusRanging
-        }
+    
+    /**
+     * Connected devices from BLE manager
+     * Returns array of currently connected CBPeripheral objects
+     */
+    private var connectedDevices: [CBPeripheral] {
+        return Array(bleManager.connectedPeripherals.values)
     }
     
-    private var currentDevice: qorvoDevice? {
+    /**
+     * Currently selected device for UWB display
+     * Returns the device at the selected index, or nil if no devices connected
+     */
+    private var currentDevice: CBPeripheral? {
         guard !connectedDevices.isEmpty else { return nil }
         let safeIndex = min(selectedDeviceIndex, connectedDevices.count - 1)
         return connectedDevices[safeIndex]
+    }
+    
+    private var currentDeviceData: BLEManager.DeviceData? {
+        guard let currentDevice = currentDevice else { return nil }
+        return bleManager.getDeviceData(for: currentDevice.identifier)
     }
     
     private var isDeveloperModeEnabled: Bool {
@@ -146,8 +201,9 @@ struct QorvoView: View {
             selectedDeviceIndex = 0
         }
         
-        if let device = currentDevice {
-            if let direction = device.uwbLocation?.direction, device.blePeripheralStatus == statusRanging {
+        if let deviceData = currentDeviceData {
+            if deviceData.isRanging {
+                let direction = deviceData.uwbLocation.direction
                 let azimuthValue = calculateAccurateAzimuth(direction)
                 
                 if !azimuthValue.isNaN && !azimuthValue.isInfinite {
@@ -164,7 +220,7 @@ struct QorvoView: View {
                     let normalizedDifference = atan2(sin(angleDifference * .pi / 180), cos(angleDifference * .pi / 180)) * 180 / .pi
                     
                     rotationAngle = currentAngle + (normalizedDifference * 0.8)
-                    elevation = device.uwbLocation?.elevation ?? 0
+                    elevation = Int(deviceData.uwbLocation.elevation)
                 }
             }
         } else {
@@ -184,12 +240,12 @@ struct QorvoView: View {
     private func handleCompassTap() {
         tapCount += 1
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if tapCount >= 3 {
-                showDebugWindow = true
-                tapCount = 0
-            } else if tapCount == 1 {
-                tapCount = 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if self.tapCount >= 5 {
+                self.showDebugWindow = true
+                self.tapCount = 0
+            } else {
+                self.tapCount = 0
             }
         }
     }
@@ -215,13 +271,13 @@ struct QorvoView: View {
                             .foregroundColor(.white)
                         }
                         
-                        if let device = currentDevice,
-                           let direction = device.uwbLocation?.direction,
-                           let distance = device.uwbLocation?.distance {
+                        if let deviceData = currentDeviceData {
+                            let direction = deviceData.uwbLocation.direction
+                            let distance = deviceData.uwbLocation.distance
                             
                             VStack(alignment: .leading, spacing: 8) {
-                                debugRow("Device", device.blePeripheralName)
-                                debugRow("Status", device.blePeripheralStatus ?? "Unknown")
+                                debugRow("Device", currentDevice?.name ?? "Unknown")
+                                debugRow("Status", deviceData.isRanging ? "Ranging" : "Connected")
                                 debugRow("Distance", String(format: "%.4f m", distance))
                                 debugRow("Direction X", String(format: "%.6f", direction.x))
                                 debugRow("Direction Y", String(format: "%.6f", direction.y))
@@ -230,8 +286,8 @@ struct QorvoView: View {
                                 debugRow("Scaled Azimuth", String(format: "%.2f°", rotationAngle))
                                 debugRow("Elevation Raw", String(elevation))
                                 debugRow("Direction Enabled", Settings().isDirectionEnable ? "YES" : "NO")
-                                debugRow("Device ID", String(device.bleUniqueID))
-                                debugRow("No Update Flag", device.uwbLocation?.noUpdate == true ? "YES" : "NO")
+                                debugRow("Device ID", currentDevice?.identifier.uuidString ?? "Unknown")
+                                debugRow("No Update Flag", deviceData.uwbLocation.noUpdate ? "YES" : "NO")
                             }
                         } else {
                             Text("No UWB data available")
@@ -267,7 +323,8 @@ struct QorvoView: View {
 
 // MARK: - Modern UIKit-based Main View
 struct ModernQorvoUIView: UIViewControllerRepresentable {
-    let device: qorvoDevice
+    let peripheral: CBPeripheral
+    let deviceData: BLEManager.DeviceData?
     @Binding var rotationAngle: Double
     @Binding var elevation: Int
     @Binding var deviceHeading: Double
@@ -284,7 +341,7 @@ struct ModernQorvoUIView: UIViewControllerRepresentable {
     }
     
     func updateUIViewController(_ uiViewController: ModernQorvoUIViewController, context: Context) {
-        uiViewController.updateDevice(device)
+        uiViewController.updateDevice(peripheral: peripheral, deviceData: deviceData)
         uiViewController.updateRotation(rotationAngle + directionCalibrationOffset)
         uiViewController.updateElevation(elevation)
         uiViewController.updateDeviceHeading(deviceHeading)
@@ -306,6 +363,7 @@ class ModernQorvoUIViewController: UIViewController {
     private var distanceContainerView: UIView!
     private var distanceValueLabel: UILabel!
     private var distanceUnitLabel: UILabel!
+    private var proximityMessageLabel: UILabel!
     private var compassContainerView: UIView!
     private var compassBackgroundView: UIView!
     private var compassImageView: UIImageView!
@@ -322,7 +380,7 @@ class ModernQorvoUIViewController: UIViewController {
         }
     }
     
-    private var currentDevice: qorvoDevice?
+    private var currentDevice: CBPeripheral?
     private var isDeveloperModeEnabled: Bool {
         UserDefaults.standard.bool(forKey: "isDeveloperModeEnabled")
     }
@@ -420,6 +478,15 @@ class ModernQorvoUIViewController: UIViewController {
         distanceUnitLabel.textAlignment = .center
         distanceContainerView.addSubview(distanceUnitLabel)
         
+        proximityMessageLabel = UILabel()
+        proximityMessageLabel.translatesAutoresizingMaskIntoConstraints = false
+        proximityMessageLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        proximityMessageLabel.textColor = .systemGreen
+        proximityMessageLabel.text = ""
+        proximityMessageLabel.textAlignment = .center
+        proximityMessageLabel.isHidden = true
+        distanceContainerView.addSubview(proximityMessageLabel)
+        
         // Distance constraints
         NSLayoutConstraint.activate([
             distanceTitleLabel.topAnchor.constraint(equalTo: distanceContainerView.topAnchor, constant: 16),
@@ -430,7 +497,10 @@ class ModernQorvoUIViewController: UIViewController {
             
             distanceUnitLabel.topAnchor.constraint(equalTo: distanceValueLabel.bottomAnchor, constant: 4),
             distanceUnitLabel.centerXAnchor.constraint(equalTo: distanceContainerView.centerXAnchor),
-            distanceUnitLabel.bottomAnchor.constraint(equalTo: distanceContainerView.bottomAnchor, constant: -16)
+            
+            proximityMessageLabel.topAnchor.constraint(equalTo: distanceUnitLabel.bottomAnchor, constant: 8),
+            proximityMessageLabel.centerXAnchor.constraint(equalTo: distanceContainerView.centerXAnchor),
+            proximityMessageLabel.bottomAnchor.constraint(equalTo: distanceContainerView.bottomAnchor, constant: -16)
         ])
     }
     
@@ -673,20 +743,21 @@ class ModernQorvoUIViewController: UIViewController {
     }
     
     // MARK: - Update Methods
-    func updateDevice(_ device: qorvoDevice) {
-        currentDevice = device
-        deviceNameLabel.text = device.blePeripheralName
+    func updateDevice(peripheral: CBPeripheral, deviceData: BLEManager.DeviceData?) {
+        currentDevice = peripheral
+        deviceNameLabel.text = peripheral.name ?? "Unknown Device"
         
-        let isRanging = device.blePeripheralStatus == statusRanging
+        let isRanging = deviceData?.isRanging ?? false
         statusIndicator.backgroundColor = isRanging ? .systemGreen : .systemBlue
         statusLabel.textColor = isRanging ? .systemGreen : .systemBlue
-        statusLabel.text = device.blePeripheralStatus ?? "Unknown"
+        statusLabel.text = isRanging ? "Ranging" : "Connected"
         
-        if let distance = device.uwbLocation?.distance {
-            distanceValueLabel.text = String(format: "%.2f", distance)
+        if let distance = deviceData?.uwbLocation.distance {
+            updateDistanceDisplay(distance: distance)
             distanceValueLabel.textColor = .systemGreen
         } else {
             distanceValueLabel.text = "--"
+            distanceUnitLabel.text = "meters"
             distanceValueLabel.textColor = UIColor.white.withAlphaComponent(0.5)
         }
     }
@@ -724,19 +795,7 @@ class ModernQorvoUIViewController: UIViewController {
     
     // MARK: - Helper Methods
     private func getElevationText(_ elevation: Int) -> String {
-        if let device = currentDevice,
-           let direction = device.uwbLocation?.direction {
-            let elevationAngle = calculateElevationAngle(direction)
-            
-            if elevationAngle > 5.0 {
-                return "ABOVE (+\(String(format: "%.1f", elevationAngle))°)"
-            } else if elevationAngle < -5.0 {
-                return "BELOW (\(String(format: "%.1f", elevationAngle))°)"
-            } else {
-                return "SAME LEVEL"
-            }
-        }
-        
+        // For now, use the elevation parameter since we don't have direct access to deviceData here
         switch elevation {
         case 1: return "ABOVE"
         case -1: return "BELOW"
@@ -761,6 +820,27 @@ class ModernQorvoUIViewController: UIViewController {
     
     @objc private func compassTapped() {
         onCompassTap?()
+    }
+    
+    // MARK: - Distance Display Helper
+    private func updateDistanceDisplay(distance: Float) {
+        if distance < 1.5 {
+            // Show in centimeters for distances below 1.5 meters
+            let centimeters = distance * 100
+            distanceValueLabel.text = String(format: "%.0f", centimeters)
+            distanceUnitLabel.text = "centimeters"
+            
+            // Show proximity message
+            proximityMessageLabel.text = "You are close to your friends!"
+            proximityMessageLabel.isHidden = false
+        } else {
+            // Show in meters for distances 1.5 meters and above
+            distanceValueLabel.text = String(format: "%.2f", distance)
+            distanceUnitLabel.text = "meters"
+            
+            // Hide proximity message
+            proximityMessageLabel.isHidden = true
+        }
     }
 }
 
@@ -821,8 +901,9 @@ struct NoDeviceConnectedView: View {
 }
 
 struct CompactDeviceSelectorView: View {
-    let devices: [qorvoDevice]
+    let devices: [CBPeripheral]
     @Binding var selectedIndex: Int
+    @EnvironmentObject var bleManager: BLEManager
     
     var body: some View {
         VStack(spacing: 8) {
@@ -834,8 +915,8 @@ struct CompactDeviceSelectorView: View {
             
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(Array(devices.enumerated()), id: \.offset) { index, device in
-                        CompactDeviceCard(device: device, index: index, isSelected: selectedIndex == index) {
+                    ForEach(Array(devices.enumerated()), id: \.element.identifier) { index, peripheral in
+                        CompactDeviceCard(peripheral: peripheral, index: index, isSelected: selectedIndex == index) {
                             selectedIndex = index
                         }
                     }
@@ -853,31 +934,36 @@ struct CompactDeviceSelectorView: View {
 }
 
 struct CompactDeviceCard: View {
-    let device: qorvoDevice
+    let peripheral: CBPeripheral
     let index: Int
     let isSelected: Bool
     let onTap: () -> Void
+    @EnvironmentObject var bleManager: BLEManager
     
     var body: some View {
         Button(action: onTap) {
             VStack(spacing: 4) {
                 HStack(spacing: 4) {
+                    let deviceData = bleManager.getDeviceData(for: peripheral.identifier)
+                    let isRanging = deviceData?.isRanging ?? false
+                    
                     Circle()
-                        .fill(device.blePeripheralStatus == statusRanging ? Color.green : Color.blue)
+                        .fill(isRanging ? Color.green : Color.blue)
                         .frame(width: 6, height: 6)
                     
-                    Text(device.blePeripheralName)
+                    Text(peripheral.name ?? "Unknown Device")
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundColor(.white)
                         .lineLimit(1)
                 }
                 
-                if let distance = device.uwbLocation?.distance {
+                if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
+                    let distance = deviceData.uwbLocation.distance
                     Text("\(String(format: "%.1f", distance))m")
                         .font(.caption2)
                         .fontWeight(.semibold)
-                        .foregroundColor(device.blePeripheralStatus == statusRanging ? .green : .blue)
+                        .foregroundColor(deviceData.isRanging ? .green : .blue)
                 } else {
                     Text("...")
                         .font(.caption2)

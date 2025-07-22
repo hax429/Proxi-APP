@@ -84,7 +84,7 @@ class LocationFields: UIView {
         // Set up the parent view's constraints
         translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: LOCATION_FIELD_HEIGHT_CONSTRAINT)
+            heightAnchor.constraint(equalToConstant: DesignConstraints.LOCATION_FIELD_HEIGHT_CONSTRAINT)
         ])
         
         backgroundColor = .white

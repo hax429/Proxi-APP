@@ -80,6 +80,9 @@ class QorvoDemoViewController: UIViewController, TableProtocol {
     var selectedAccessory = -1
     var selectExpand = true
     
+    // Device list for UIKit compatibility
+    var qorvoDevices: [qorvoDevice?] = []
+    
     let logger = os.Logger(subsystem: "com.qorvo.ni", category: "QorvoDemoViewController")
         
     override func viewDidLoad() {
