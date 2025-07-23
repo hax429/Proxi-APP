@@ -18,6 +18,14 @@ struct FriendsView: View {
     @State private var connectedDevicesCount = 0
     @State private var refreshTrigger = UUID() // Force view refresh with unique ID
     
+    // Request simulation states
+    @State private var pendingRequests: [PendingRequest] = []
+    @State private var incomingRequests: [IncomingRequest] = [
+        IncomingRequest(id: "katie_pilot", deviceName: "Katie's Pilot", senderName: "Katie", timestamp: Date())
+    ]
+    @State private var showApprovalPopup = false
+    @State private var approvedRequestDeviceName = ""
+    
     private let logger = os.Logger(subsystem: "com.qorvo.ni", category: "FriendsView")
 
     // Computed property that uses BLEManager connection status or simulation
@@ -77,17 +85,20 @@ struct FriendsView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
-                            // Combined host device section
-                            hostDeviceSection
-                            pairedFriendsSection
-                            nearbyProxisSection
+                            // Simplified sections
+                            connectedDevicesSection
                             incomingRequestsSection
+                            availableDevicesSection
                         }
                         .padding()
                     }
                 }
             }
         }
+        .overlay(
+            // Approval popup overlay
+            approvalPopupOverlay
+        )
         .onReceive(timer) { _ in
             updateDeviceCounts()
             // Force real-time UI updates for distance and status
@@ -178,105 +189,45 @@ struct FriendsView: View {
         }
     }
 
-    // MARK: - Host Device Section
-    private var hostDeviceSection: some View {
+    // MARK: - Connected Devices Section
+    private var connectedDevicesSection: some View {
         VStack(spacing: 16) {
             HStack {
-                Text("Host Device")
+                Text("My Devices")
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 Spacer()
-                Text("Connected")
-                    .font(.caption)
-                    .foregroundColor(.green)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.green.opacity(0.2))
-                    .cornerRadius(8)
+                if !connectedDevices.isEmpty {
+                    Text("\(connectedDevices.count) connected")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green.opacity(0.2))
+                        .cornerRadius(8)
+                }
             }
             
-            if let host = hostDevice {
-                HostDeviceCard(peripheral: host, bleManager: bleManager)
+            if connectedDevices.isEmpty {
+                emptyConnectedDevicesView
             } else {
-                emptyHostDeviceView
+                VStack(spacing: 8) {
+                    ForEach(connectedDevices, id: \.identifier) { peripheral in
+                        SimpleDeviceCard(
+                            peripheral: peripheral,
+                            bleManager: bleManager,
+                            isConnected: true,
+                            pendingRequests: pendingRequests,
+                            onAction: { bleManager.disconnect(peripheralID: peripheral.identifier) }
+                        )
+                    }
+                }
             }
         }
     }
     
-    // MARK: - Paired Friends Section
-    private var pairedFriendsSection: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Text("Connected Devices")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                Spacer()
-                Text("\(otherConnectedDevices.count)")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(8)
-            }
-            
-            if otherConnectedDevices.isEmpty {
-                emptyFriendsView(text: "No other devices connected.")
-            } else {
-                connectedDevicesList
-            }
-        }
-    }
-    
-    private var connectedDevicesList: some View {
-        VStack(spacing: 8) {
-            ForEach(otherConnectedDevices, id: \.identifier) { peripheral in
-                ConnectedDeviceCard(peripheral: peripheral, bleManager: bleManager, onDisconnect: { peripheralID in
-                    bleManager.disconnect(peripheralID: peripheralID)
-                })
-            }
-        }
-    }
-    
-    // MARK: - Nearby Proxis Section
-    private var nearbyProxisSection: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Text("Nearby Devices")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                Spacer()
-                Text("\(discoveredDevices.count)")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(8)
-            }
-            
-            if discoveredDevices.isEmpty {
-                emptyFriendsView(text: "No nearby devices found.")
-            } else {
-                nearbyProxisList
-            }
-        }
-    }
-    
-    private var nearbyProxisList: some View {
-        VStack(spacing: 8) {
-            ForEach(discoveredDevices, id: \.identifier) { peripheral in
-                DiscoveredDeviceCard(peripheral: peripheral, onConnect: { peripheral in
-                    bleManager.connect(to: peripheral)
-                })
-            }
-        }
-    }
-    
-    // MARK: - Incoming Requests
+    // MARK: - Incoming Requests Section
     private var incomingRequestsSection: some View {
         VStack(spacing: 16) {
             HStack {
@@ -285,39 +236,94 @@ struct FriendsView: View {
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 Spacer()
-                Text("\(friendsManager.incomingRequests.count)")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(8)
+                if !incomingRequests.isEmpty {
+                    Text("\(incomingRequests.count)")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.orange.opacity(0.2))
+                        .cornerRadius(8)
+                }
             }
-            if friendsManager.incomingRequests.isEmpty {
-                emptyFriendsView(text: "No incoming requests.")
+            
+            if incomingRequests.isEmpty {
+                emptyIncomingRequestsView
             } else {
-                // Incoming requests list would go here
-                Text("Incoming requests feature coming soon...")
-                    .foregroundColor(.white.opacity(0.7))
-                    .padding()
+                VStack(spacing: 8) {
+                    ForEach(incomingRequests, id: \.id) { request in
+                        IncomingRequestCard(
+                            request: request,
+                            onAccept: { acceptRequest(request) },
+                            onDecline: { declineRequest(request) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Available Devices Section
+    private var availableDevicesSection: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Available Devices")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                Spacer()
+                if bleManager.isScanning {
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                            .scaleEffect(0.6)
+                        Text("Scanning...")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                } else if !discoveredDevices.isEmpty {
+                    Text("\(discoveredDevices.count) found")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(8)
+                }
+            }
+            
+            if discoveredDevices.isEmpty {
+                emptyAvailableDevicesView
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(discoveredDevices, id: \.identifier) { peripheral in
+                        SimpleDeviceCard(
+                            peripheral: peripheral,
+                            bleManager: bleManager,
+                            isConnected: false,
+                            pendingRequests: pendingRequests,
+                            onAction: { sendConnectionRequest(to: peripheral) }
+                        )
+                    }
+                }
             }
         }
     }
     
     // MARK: - Empty State Views
-    private var emptyHostDeviceView: some View {
-        VStack(spacing: 16) {
+    private var emptyConnectedDevicesView: some View {
+        VStack(spacing: 12) {
             Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 48))
+                .font(.system(size: 32))
                 .foregroundColor(.gray)
             
-            Text("No Host Device")
-                .font(.headline)
+            Text("No devices connected")
+                .font(.subheadline)
                 .foregroundColor(.white)
             
-            Text("Connect an Arduino device in Settings to get started.")
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.7))
+            Text("Connect a device to start sharing your location")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
         }
         .padding()
@@ -325,19 +331,95 @@ struct FriendsView: View {
         .cornerRadius(12)
     }
     
-    private func emptyFriendsView(text: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "person.2")
-                .font(.system(size: 48))
+    private var emptyAvailableDevicesView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 32))
                 .foregroundColor(.gray)
             
-            Text(text)
-                .font(.headline)
+            Text("No devices found")
+                .font(.subheadline)
                 .foregroundColor(.white)
+            
+            Text("Make sure other devices are nearby and discoverable")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
         }
         .padding()
         .background(Color("232229"))
         .cornerRadius(12)
+    }
+    
+    private var emptyIncomingRequestsView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "person.badge.plus")
+                .font(.system(size: 32))
+                .foregroundColor(.gray)
+            
+            Text("No incoming requests")
+                .font(.subheadline)
+                .foregroundColor(.white)
+            
+            Text("Connection requests from other users will appear here")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+        .background(Color("232229"))
+        .cornerRadius(12)
+    }
+    
+    // MARK: - Request Handling Methods
+    private func acceptRequest(_ request: IncomingRequest) {
+        // Remove from incoming requests
+        incomingRequests.removeAll { $0.id == request.id }
+        
+        // Show approval popup
+        approvedRequestDeviceName = request.deviceName
+        showApprovalPopup = true
+        
+        // Hide popup after 2 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            showApprovalPopup = false
+        }
+        
+        // Simulate connection (in real app, this would trigger actual BLE connection)
+        print("Accepted connection request from \(request.senderName)")
+    }
+    
+    private func declineRequest(_ request: IncomingRequest) {
+        incomingRequests.removeAll { $0.id == request.id }
+        print("Declined connection request from \(request.senderName)")
+    }
+    
+    private func sendConnectionRequest(to peripheral: CBPeripheral) {
+        // Add to pending requests
+        let pendingRequest = PendingRequest(
+            id: peripheral.identifier.uuidString,
+            deviceName: peripheral.name ?? "Unknown Device",
+            timestamp: Date()
+        )
+        pendingRequests.append(pendingRequest)
+        
+        // Simulate approval after 3 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            // Remove from pending
+            self.pendingRequests.removeAll { $0.id == pendingRequest.id }
+            
+            // Show approval popup
+            self.approvedRequestDeviceName = pendingRequest.deviceName
+            self.showApprovalPopup = true
+            
+            // Hide popup after 2 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                self.showApprovalPopup = false
+            }
+            
+            // Actually connect to the device
+            self.bleManager.connect(to: peripheral)
+        }
     }
     
     // MARK: - Unpaired State View
@@ -346,35 +428,27 @@ struct FriendsView: View {
             Spacer()
             
             VStack(spacing: 16) {
-                Text("Connect Arduino Device First")
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 64))
+                    .foregroundColor(.blue.opacity(0.6))
+                
+                Text("Get Started")
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 
-                Text("To connect with friends, you need to connect your Arduino UWB device first. This enables you to discover and connect with other users nearby.")
+                Text("Connect your device to start finding and connecting with friends nearby.")
                     .font(.body)
                     .foregroundColor(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
-                
-                if bleManager.isScanning {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .scaleEffect(0.8)
-                        Text("Scanning for devices...")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    .padding(.top, 8)
-                }
             }
             
             Button(action: { selectedTab = 4 }) {
                 HStack(spacing: 12) {
-                    Image(systemName: "link.circle.fill")
-                        .font(.system(size: 20))
-                    Text("Connect Arduino")
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 18))
+                    Text("Connect Device")
                         .font(.headline)
                         .fontWeight(.semibold)
                 }
@@ -396,244 +470,82 @@ struct FriendsView: View {
         }
         .padding()
     }
+    
+    // MARK: - Approval Popup Overlay
+    private var approvalPopupOverlay: some View {
+        Group {
+            if showApprovalPopup {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 16) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 48))
+                            .foregroundColor(.green)
+                        
+                        Text("Request Approved!")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("Connection established with \(approvedRequestDeviceName)")
+                            .font(.body)
+                            .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(24)
+                    .background(Color("232229"))
+                    .cornerRadius(16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 40)
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.3), value: showApprovalPopup)
+            }
+        }
+    }
 }
 
 // MARK: - Device Card Views
-struct HostDeviceCard: View {
+struct SimpleDeviceCard: View {
     let peripheral: CBPeripheral
     let bleManager: BLEManager
-    @State private var refreshTrigger = UUID()
-    @State private var currentDistance: Float = 0.0
-    @State private var distanceTimer: Timer?
+    let isConnected: Bool
+    let onAction: () -> Void
+    let pendingRequests: [PendingRequest]
+    @State private var isProcessing = false
+    
+    init(peripheral: CBPeripheral, bleManager: BLEManager, isConnected: Bool, pendingRequests: [PendingRequest] = [], onAction: @escaping () -> Void) {
+        self.peripheral = peripheral
+        self.bleManager = bleManager
+        self.isConnected = isConnected
+        self.pendingRequests = pendingRequests
+        self.onAction = onAction
+    }
     
     var body: some View {
-        VStack(spacing: 16) {
-            // Connection status header
-            HStack(spacing: 16) {
-                // Proxi status indicator
-                ZStack {
+        HStack(spacing: 16) {
+            // Device icon with status
+            ZStack {
+                Circle()
+                    .fill(statusColor.opacity(0.2))
+                    .frame(width: 50, height: 50)
+                
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 20))
+                    .foregroundColor(statusColor)
+                
+                // Connection indicator
+                if isConnected {
                     Circle()
                         .fill(Color.green)
-                        .frame(width: 16, height: 16)
-                    
-                    Circle()
-                        .stroke(Color.green.opacity(0.3), lineWidth: 2)
-                        .frame(width: 24, height: 24)
-                        .scaleEffect(1.2)
-                        .opacity(0.8)
+                        .frame(width: 12, height: 12)
+                        .offset(x: 18, y: -18)
                 }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Arduino Connected")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                    
-                    Text("Ready to discover friends")
-                        .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.7))
-                }
-                
-                Spacer()
-                
-                // Status indicator
-                Circle()
-                    .fill(Color.green)
-                    .frame(width: 12, height: 12)
-            }
-            
-            // Device info
-            HStack(spacing: 16) {
-                // Device icon
-                ZStack {
-                    Circle()
-                        .fill(Color.green.opacity(0.2))
-                        .frame(width: 50, height: 50)
-                    
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .font(.system(size: 20))
-                        .foregroundColor(.green)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(peripheral.name ?? "Unknown Device")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
-                        
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 8, height: 8)
-                    }
-                    
-                    Text("Connected")
-                        .font(.subheadline)
-                        .foregroundColor(.green)
-                    
-                    // Distance display with real-time updates
-                    HStack(spacing: 4) {
-                        Image(systemName: "location.fill")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                        Text("\(String(format: "%.2f", currentDistance))m")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.green)
-                    }
-                    .id(refreshTrigger) // Force refresh with unique ID
-                    .onAppear {
-                        startDistanceUpdates()
-                    }
-                    .onDisappear {
-                        stopDistanceUpdates()
-                    }
-                }
-                
-                Spacer()
-                
-                // Host indicator
-                VStack(spacing: 4) {
-                    Image(systemName: "crown.fill")
-                        .font(.caption)
-                        .foregroundColor(.yellow)
-                    Text("HOST")
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.yellow)
-                }
-            }
-        }
-        .padding()
-        .background(Color("232229"))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
-    }
-    
-    // MARK: - Distance Update Methods
-    
-    private func startDistanceUpdates() {
-        // Update immediately
-        updateDistance()
-        
-        // Start timer for very frequent updates (real-time)
-        distanceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            updateDistance()
-        }
-    }
-    
-    private func stopDistanceUpdates() {
-        distanceTimer?.invalidate()
-        distanceTimer = nil
-    }
-    
-    private func updateDistance() {
-        if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
-            currentDistance = deviceData.uwbLocation.distance
-        } else {
-            currentDistance = 0.0
-        }
-    }
-}
-
-struct ConnectedDeviceCard: View {
-    let peripheral: CBPeripheral
-    let bleManager: BLEManager
-    let onDisconnect: (UUID) -> Void
-    @State private var refreshTrigger = UUID()
-    
-    var body: some View {
-        HStack(spacing: 16) {
-            // Device icon
-            ZStack {
-                Circle()
-                    .fill(Color.blue.opacity(0.2))
-                    .frame(width: 50, height: 50)
-                
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.system(size: 20))
-                    .foregroundColor(.blue)
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(peripheral.name ?? "Unknown Device")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                    
-                    Circle()
-                        .fill(Color.blue)
-                        .frame(width: 8, height: 8)
-                }
-                
-                Text("Connected")
-                    .font(.subheadline)
-                    .foregroundColor(.blue)
-                
-                // Distance display with real-time refresh trigger
-                if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "location.fill")
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                        Text("\(String(format: "%.2f", deviceData.uwbLocation.distance))m")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.blue)
-                    }
-                    .id("distance-\(peripheral.identifier)-\(refreshTrigger)") // Unique ID for real-time updates
-                } else {
-                    HStack(spacing: 4) {
-                        Image(systemName: "location.slash")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.5))
-                        Text("Distance unavailable")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.5))
-                    }
-                }
-            }
-            
-            Spacer()
-            
-            // Disconnect button
-            Button(action: {
-                onDisconnect(peripheral.identifier)
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title2)
-                    .foregroundColor(.red)
-            }
-        }
-        .padding()
-        .background(Color("232229"))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
-    }
-}
-
-struct DiscoveredDeviceCard: View {
-    let peripheral: CBPeripheral
-    let onConnect: (CBPeripheral) -> Void
-    @State private var isConnecting = false
-    
-    var body: some View {
-        HStack(spacing: 16) {
-            // Device icon
-            ZStack {
-                Circle()
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(width: 50, height: 50)
-                
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.system(size: 20))
-                    .foregroundColor(.gray)
             }
             
             VStack(alignment: .leading, spacing: 4) {
@@ -642,35 +554,52 @@ struct DiscoveredDeviceCard: View {
                     .fontWeight(.semibold)
                     .foregroundColor(.white)
                 
-                Text("Discovered")
-                    .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.7))
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                    Text(statusText)
+                        .font(.caption)
+                        .foregroundColor(statusColor)
+                }
+                
+                // Distance for connected devices
+                if isConnected, let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.fill")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.6))
+                        Text("\(String(format: "%.1f", deviceData.uwbLocation.distance))m")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                }
             }
             
             Spacer()
             
-            // Connect button
+            // Action button
             Button(action: {
-                print("Connect button tapped for device: \(peripheral.name ?? "Unknown") (ID: \(peripheral.identifier))")
-                isConnecting = true
-                onConnect(peripheral)
-                
-                // Reset connecting state after a delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    isConnecting = false
+                if !hasPendingRequest {
+                    isProcessing = true
+                    onAction()
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        isProcessing = false
+                    }
                 }
             }) {
-                if isConnecting {
+                if isProcessing {
                     ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                        .progressViewStyle(CircularProgressViewStyle(tint: statusColor))
                         .scaleEffect(0.8)
                 } else {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.blue)
+                    Image(systemName: actionIcon)
+                        .font(.title3)
+                        .foregroundColor(actionColor)
                 }
             }
-            .disabled(isConnecting)
+            .disabled(isProcessing || hasPendingRequest)
         }
         .padding()
         .background(Color("232229"))
@@ -680,7 +609,117 @@ struct DiscoveredDeviceCard: View {
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
     }
+    
+    private var hasPendingRequest: Bool {
+        pendingRequests.contains { $0.id == peripheral.identifier.uuidString }
+    }
+    
+    private var statusColor: Color {
+        if hasPendingRequest {
+            return .orange
+        }
+        return isConnected ? .green : .blue
+    }
+    
+    private var statusText: String {
+        if hasPendingRequest {
+            return "Request Sent"
+        }
+        return isConnected ? "Connected" : "Available"
+    }
+    
+    private var actionIcon: String {
+        if hasPendingRequest {
+            return "clock"
+        }
+        return isConnected ? "xmark.circle" : "plus.circle"
+    }
+    
+    private var actionColor: Color {
+        if hasPendingRequest {
+            return .orange
+        }
+        return isConnected ? .red : .blue
+    }
 }
+
+// MARK: - Incoming Request Card
+struct IncomingRequestCard: View {
+    let request: IncomingRequest
+    let onAccept: () -> Void
+    let onDecline: () -> Void
+    @State private var isProcessing = false
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            // User avatar
+            ZStack {
+                Circle()
+                    .fill(Color.orange.opacity(0.2))
+                    .frame(width: 50, height: 50)
+                
+                Text(String(request.senderName.prefix(1)))
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.orange)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(request.senderName)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                
+                Text("wants to connect")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.7))
+                
+                Text(request.deviceName)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+            
+            Spacer()
+            
+            // Action buttons
+            HStack(spacing: 8) {
+                Button(action: {
+                    isProcessing = true
+                    onDecline()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        isProcessing = false
+                    }
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.red)
+                }
+                .disabled(isProcessing)
+                
+                Button(action: {
+                    isProcessing = true
+                    onAccept()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        isProcessing = false
+                    }
+                }) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.green)
+                }
+                .disabled(isProcessing)
+            }
+        }
+        .padding()
+        .background(Color("232229"))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+        )
+    }
+}
+
 
 // Keep all the supporting views the same (FriendsListRowView, NearbyProxiRowView, etc.)
 
@@ -874,6 +913,20 @@ struct ProxiDevice: Identifiable {
     let distance: Int
     let isOnline: Bool
     let lastSeen: Date
+}
+
+// MARK: - Request Data Models
+struct IncomingRequest: Identifiable {
+    let id: String
+    let deviceName: String
+    let senderName: String
+    let timestamp: Date
+}
+
+struct PendingRequest: Identifiable {
+    let id: String
+    let deviceName: String
+    let timestamp: Date
 }
 
 
