@@ -18,6 +18,38 @@ import CoreBluetooth
 import CoreLocation
 import simd
 
+// MARK: - Device Color System
+
+/// Returns a unique UIColor for each device index
+func getDeviceColor(for index: Int) -> UIColor {
+    let colors: [UIColor] = [
+        .systemGreen,    // Device 0 - Green
+        .systemBlue,     // Device 1 - Blue  
+        .systemOrange,   // Device 2 - Orange
+        .systemPurple,   // Device 3 - Purple
+        .systemRed,      // Device 4 - Red
+        .systemYellow,   // Device 5 - Yellow
+        .systemPink,     // Device 6 - Pink
+        .systemTeal      // Device 7 - Teal
+    ]
+    return colors[index % colors.count]
+}
+
+/// Returns a unique SwiftUI Color for each device index
+func getSwiftUIDeviceColor(for index: Int) -> Color {
+    let colors: [Color] = [
+        .green,    // Device 0 - Green
+        .blue,     // Device 1 - Blue  
+        .orange,   // Device 2 - Orange
+        .purple,   // Device 3 - Purple
+        .red,      // Device 4 - Red
+        .yellow,   // Device 5 - Yellow
+        .pink,     // Device 6 - Pink
+        .teal      // Device 7 - Teal
+    ]
+    return colors[index % colors.count]
+}
+
 // MARK: - QorvoView - Main UWB Interface
 /**
  * QorvoView - Ultra-Wideband Compass and Ranging Display
@@ -86,6 +118,7 @@ struct QorvoView: View {
                     ModernQorvoUIView(
                         peripheral: device,
                         deviceData: currentDeviceData,
+                        selectedDeviceIndex: selectedDeviceIndex,
                         rotationAngle: $rotationAngle,
                         elevation: $elevation,
                         deviceHeading: $deviceHeading,
@@ -486,6 +519,7 @@ struct QorvoView: View {
 struct ModernQorvoUIView: UIViewControllerRepresentable {
     let peripheral: CBPeripheral
     let deviceData: BLEManager.DeviceData?
+    let selectedDeviceIndex: Int
     @Binding var rotationAngle: Double
     @Binding var elevation: Int
     @Binding var deviceHeading: Double
@@ -502,7 +536,7 @@ struct ModernQorvoUIView: UIViewControllerRepresentable {
     }
     
     func updateUIViewController(_ uiViewController: ModernQorvoUIViewController, context: Context) {
-        uiViewController.updateDevice(peripheral: peripheral, deviceData: deviceData)
+        uiViewController.updateDevice(peripheral: peripheral, deviceData: deviceData, selectedDeviceIndex: selectedDeviceIndex)
         uiViewController.updateRotation(rotationAngle + directionCalibrationOffset)
         uiViewController.updateElevation(elevation)
         uiViewController.updateDeviceHeading(deviceHeading)
@@ -626,7 +660,7 @@ class ModernQorvoUIViewController: UIViewController {
         distanceValueLabel = UILabel()
         distanceValueLabel.translatesAutoresizingMaskIntoConstraints = false
         distanceValueLabel.font = UIFont.systemFont(ofSize: 42, weight: .bold)
-        distanceValueLabel.textColor = .systemGreen
+        distanceValueLabel.textColor = getDeviceColor(for: 0) // Default to first device color
         distanceValueLabel.text = "0.00"
         distanceValueLabel.textAlignment = .center
         distanceContainerView.addSubview(distanceValueLabel)
@@ -904,7 +938,7 @@ class ModernQorvoUIViewController: UIViewController {
     }
     
     // MARK: - Update Methods
-    func updateDevice(peripheral: CBPeripheral, deviceData: BLEManager.DeviceData?) {
+    func updateDevice(peripheral: CBPeripheral, deviceData: BLEManager.DeviceData?, selectedDeviceIndex: Int) {
         currentDevice = peripheral
         deviceNameLabel.text = peripheral.name ?? "Unknown Device"
         
@@ -915,7 +949,7 @@ class ModernQorvoUIViewController: UIViewController {
         
         if let distance = deviceData?.uwbLocation.distance {
             updateDistanceDisplay(distance: distance)
-            distanceValueLabel.textColor = .systemGreen
+            distanceValueLabel.textColor = getDeviceColor(for: selectedDeviceIndex)
         } else {
             distanceValueLabel.text = "--"
             distanceUnitLabel.text = "meters"
@@ -1122,11 +1156,11 @@ struct CompactDeviceCard: View {
             VStack(spacing: 4) {
                 HStack(spacing: 4) {
                     let deviceData = bleManager.getDeviceData(for: peripheral.identifier)
-                    let isHostDevice = index == 0 // First device is considered the host
                     let isRanging = deviceData?.isRanging ?? false
+                    let deviceColor = getSwiftUIDeviceColor(for: index)
                     
                     Circle()
-                        .fill(isRanging ? (isHostDevice ? Color.green : Color.blue) : Color.gray)
+                        .fill(isRanging ? deviceColor : Color.gray)
                         .frame(width: 6, height: 6)
                         .animation(.easeInOut(duration: 0.2), value: isRanging) // Animate status changes
                     
@@ -1139,11 +1173,11 @@ struct CompactDeviceCard: View {
                 
                 if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
                     let distance = deviceData.uwbLocation.distance
-                    let isHostDevice = index == 0 // First device is considered the host
+                    let deviceColor = getSwiftUIDeviceColor(for: index)
                     Text("\(String(format: "%.1f", distance))m")
                         .font(.caption2)
                         .fontWeight(.semibold)
-                        .foregroundColor(isHostDevice ? .green : .blue)
+                        .foregroundColor(deviceColor)
                         .animation(.easeInOut(duration: 0.1), value: distance) // Smooth distance updates
                 } else {
                     Text("...")
@@ -1155,11 +1189,11 @@ struct CompactDeviceCard: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? (index == 0 ? Color.green.opacity(0.3) : Color.blue.opacity(0.3)) : Color.white.opacity(0.08))
+                    .fill(isSelected ? getSwiftUIDeviceColor(for: index).opacity(0.3) : Color.white.opacity(0.08))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(
-                                isSelected ? (index == 0 ? Color.green.opacity(0.6) : Color.blue.opacity(0.6)) : Color.clear,
+                                isSelected ? getSwiftUIDeviceColor(for: index).opacity(0.6) : Color.clear,
                                 lineWidth: 1
                             )
                     )
@@ -1168,6 +1202,7 @@ struct CompactDeviceCard: View {
         .buttonStyle(PlainButtonStyle())
     }
 }
+
 
 // MARK: - Location Manager Delegate
 class LocationManagerDelegate: NSObject, CLLocationManagerDelegate, ObservableObject {
