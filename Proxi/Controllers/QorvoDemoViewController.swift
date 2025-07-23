@@ -467,7 +467,7 @@ func getDirectionFromHorizontalAngle(rad: Float) -> simd_float3 {
 
 func getElevationFromInt(elevation: Int?) -> String {
     guard elevation != nil else {
-        return "unknown".localizedUppercase
+        return "same level".localizedUppercase
     }
     // TODO: Use Localizable String
     switch elevation  {
@@ -476,11 +476,11 @@ func getElevationFromInt(elevation: Int?) -> String {
     case NINearbyObject.VerticalDirectionEstimate.below.rawValue:
         return "below".localizedUppercase
     case NINearbyObject.VerticalDirectionEstimate.same.rawValue:
-        return "same".localizedUppercase
+        return "same level".localizedUppercase
     case NINearbyObject.VerticalDirectionEstimate.aboveOrBelow.rawValue, NINearbyObject.VerticalDirectionEstimate.unknown.rawValue:
-        return "unknown".localizedUppercase
+        return "same level".localizedUppercase
     default:
-        return "unknown".localizedUppercase
+        return "same level".localizedUppercase
     }
 }
 

@@ -58,6 +58,7 @@ struct QorvoView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var bleManager: BLEManager
     @EnvironmentObject var friendsManager: FriendsManager
+    @StateObject var simulationManager = SimulationManager()
     @Binding var isSidebarOpen: Bool
     
     // MARK: - Device Management State
@@ -142,12 +143,27 @@ struct QorvoView: View {
     // MARK: - Computed Properties
     
     /**
-     * Connected devices from BLE manager
+     * Connected devices from BLE manager or simulation
      * Returns array of currently connected CBPeripheral objects
      */
     private var connectedDevices: [CBPeripheral] {
-        return Array(bleManager.connectedPeripherals.values)
+        if simulationManager.isSimulationEnabled {
+            // Return simulation devices as connected peripherals
+            return simulationManager.getDeviceIds().compactMap { deviceId in
+                if let fakeDevice = simulationManager.getDeviceData(for: deviceId) {
+                    let mockPeripheral = simulationManager.createMockPeripheral(name: fakeDevice.name, id: deviceId)
+                    // For simulation, we'll return nil since we can't create CBPeripheral instances
+                    // The UI will handle this case appropriately
+                    return nil
+                }
+                return nil
+            }
+        } else {
+            return Array(bleManager.connectedPeripherals.values)
+        }
     }
+    
+
     
     /**
      * Currently selected device for UWB display
@@ -161,7 +177,28 @@ struct QorvoView: View {
     
     private var currentDeviceData: BLEManager.DeviceData? {
         guard let currentDevice = currentDevice else { return nil }
-        return bleManager.getDeviceData(for: currentDevice.identifier)
+        
+        if simulationManager.isSimulationEnabled {
+            // Return simulation data
+            if let fakeDevice = simulationManager.getDeviceData(for: currentDevice.identifier) {
+                // Create a mock DeviceData from simulation data
+                var deviceData = BLEManager.DeviceData(peripheral: currentDevice)
+                deviceData.isRanging = fakeDevice.isRanging
+                deviceData.uwbLocation.distance = fakeDevice.distance
+                deviceData.uwbLocation.direction = fakeDevice.direction
+                deviceData.uwbLocation.elevation = fakeDevice.elevation
+                deviceData.uwbLocation.isValid = true
+                deviceData.uwbLocation.isConverged = true
+                deviceData.uwbLocation.noUpdate = false
+                deviceData.uwbLocation.timestamp = fakeDevice.lastUpdate
+                deviceData.lastUpdated = fakeDevice.lastUpdate
+                deviceData.deviceName = fakeDevice.name
+                return deviceData
+            }
+            return nil
+        } else {
+            return bleManager.getDeviceData(for: currentDevice.identifier)
+        }
     }
     
     private var isDeveloperModeEnabled: Bool {
@@ -924,7 +961,7 @@ class ModernQorvoUIViewController: UIViewController {
         case 1: return "ABOVE"
         case -1: return "BELOW"
         case 0: return "SAME LEVEL"
-        default: return "UNKNOWN"
+        default: return "SAME LEVEL"
         }
     }
     

@@ -61,7 +61,6 @@ import Foundation
 import SwiftUI
 import CoreBluetooth
 import NearbyInteraction
-import ARKit
 import simd
 import CoreLocation
 
@@ -301,10 +300,11 @@ class BLEManager: NSObject, ObservableObject {
     }
     
     // MARK: - AR Session Properties (for enhanced positioning)
-    private var arSession: ARSession?
+    // Note: ARKit not available in this project, so ARSession is disabled
     private var isARSessionEnabled = false
     
     // MARK: - Location Manager for Device Heading
+    // Note: LocationManager is defined in LocationManager.swift in the same module
     private var locationManager: LocationManager?
     
     // MARK: - Published Properties (Enhanced for multiple connections)
@@ -323,6 +323,8 @@ class BLEManager: NSObject, ObservableObject {
     @Published var connectedDevicesData: [UUID: DeviceData] = [:]
     @Published var deviceRSSI: [UUID: Int] = [:]
     @Published var deviceStates: [UUID: String] = [:]
+    
+    // Note: Simulation functionality has been moved to separate SimulationManager
     
     // Device data structure for multiple connections
     struct DeviceData {
@@ -430,6 +432,8 @@ class BLEManager: NSObject, ObservableObject {
             }
         }
     }
+    
+    // Note: Simulation functionality has been moved to separate SimulationManager
     
     private func checkDeviceCapabilities() {
         let capabilities = NISession.deviceCapabilities
@@ -830,8 +834,6 @@ class BLEManager: NSObject, ObservableObject {
             // Reset AR session if it was problematic
             if isARSessionEnabled {
                 isARSessionEnabled = false
-                arSession?.pause()
-                arSession = nil
                 addDebugLog("📷 AR session reset for retry")
             }
             
@@ -880,9 +882,8 @@ class BLEManager: NSObject, ObservableObject {
         print("✅ [\(deviceName)] Created NISession")
         
         // Start preparing AR session early to allow stabilization time
-        if ARWorldTrackingConfiguration.isSupported {
-            setupARSessionIfAvailable()
-        }
+        // Note: ARKit not available in this project, so AR session setup is disabled
+        // setupARSessionIfAvailable()
         
         debugProtocolState(for: peripheralID, step: "Starting UWB Protocol")
         
@@ -906,29 +907,9 @@ class BLEManager: NSObject, ObservableObject {
     }
     
     // MARK: - Enhanced AR Session Setup (following Qorvo best practices)
+    // Note: ARKit not available in this project, so AR session setup is disabled
     private func setupARSessionIfAvailable() {
-        guard ARWorldTrackingConfiguration.isSupported else {
-            addDebugLog("⚠️ AR World Tracking not supported on this device")
-            return
-        }
-        
-        // Create AR session early but don't link until UWB is fully active
-        // This prevents the INVALID_AR_SESSION_DESCRIPTION error
-        if arSession == nil {
-            arSession = ARSession()
-            addDebugLog("📷 AR Session created for enhanced positioning")
-            
-            let configuration = ARWorldTrackingConfiguration()
-            configuration.worldAlignment = .gravity  // Critical for direction accuracy
-            configuration.isCollaborationEnabled = false
-            configuration.userFaceTrackingEnabled = false
-            configuration.initialWorldMap = nil
-            configuration.isLightEstimationEnabled = true
-            
-            // Start AR session immediately to begin stabilization
-            arSession?.run(configuration, options: [.resetTracking, .removeExistingAnchors])
-            addDebugLog("📷 AR Session started - will link after UWB confirmation...")
-        }
+        addDebugLog("⚠️ AR World Tracking not available in this project")
     }
     
     // MARK: - Link AR to NI Session (called when NI session is ready)
@@ -940,46 +921,14 @@ class BLEManager: NSObject, ObservableObject {
     }
     
     private func linkARSessionToNI(for peripheralID: UUID) {
-        guard let arSession = arSession, let niSession = niSessions[peripheralID] else {
-            addDebugLog("⚠️ [\(peripheralID)] Cannot link - AR or NI session not available")
-            return
-        }
-        
-        guard let deviceData = connectedDevicesData[peripheralID] else {
-            addDebugLog("⚠️ [\(peripheralID)] Cannot link - no device data")
-            return
-        }
-        
-        // Only link if configuration is ready and we're not already linked
-        guard !isARSessionEnabled && deviceData.isRanging else {
-            if isARSessionEnabled {
-                addDebugLog("⚠️ [\(deviceData.deviceName)] AR Session already linked")
-            } else if !deviceData.isRanging {
-                addDebugLog("⚠️ [\(deviceData.deviceName)] Cannot link AR - UWB not yet active")
-            }
-            return
-        }
-        
-        // Ensure AR session has had time to stabilize
-        addDebugLog("📷 [\(deviceData.deviceName)] Linking AR session to stabilized NI session...")
-        
-        do {
-            // Link AR session to NI session with error handling
-            niSession.setARSession(arSession)
-            isARSessionEnabled = true
-            addDebugLog("✅ [\(deviceData.deviceName)] AR Session successfully linked to NI Session")
-        } catch {
-            addDebugLog("❌ [\(deviceData.deviceName)] Failed to link AR session: \(error.localizedDescription)")
-            // Continue without AR enhancement
-        }
+        // Note: ARKit not available in this project, so AR session linking is disabled
+        addDebugLog("📷 [\(peripheralID)] AR session linking disabled (ARKit not available)")
     }
     
     func enableAREnhancedPositioning(_ enable: Bool) {
         if enable && !isARSessionEnabled {
             setupARSessionIfAvailable()
         } else if !enable && isARSessionEnabled {
-            arSession?.pause()
-            arSession = nil
             isARSessionEnabled = false
             addDebugLog("📷 AR Session disabled")
             
@@ -1098,15 +1047,8 @@ class BLEManager: NSObject, ObservableObject {
         cancelProtocolTimeoutTimer(for: peripheralID)
             
             // Now that UWB is confirmed active, link AR session if available and ready
-            if ARWorldTrackingConfiguration.isSupported && !isARSessionEnabled && arSession != nil {
-                addDebugLog("📷 [\(deviceName)] UWB active - linking prepared AR session...")
-                // Give a moment for any final AR stabilization
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    self.linkARSessionToNI(for: peripheralID)
-                }
-            } else if ARWorldTrackingConfiguration.isSupported && arSession == nil {
-                addDebugLog("⚠️ [\(deviceName)] AR session not ready - continuing with UWB only")
-            }
+            // Note: ARKit not available in this project, so AR session linking is disabled
+            addDebugLog("📷 [\(deviceName)] UWB active - AR session linking disabled (ARKit not available)")
             
         case .accessoryUwbDidStop:
             deviceStates[peripheralID] = "UWB Stopped"
@@ -1141,17 +1083,13 @@ class BLEManager: NSObject, ObservableObject {
             addDebugLog("🔧 [\(deviceName)] Creating NINearbyAccessoryConfiguration...")
             
             let config = try NINearbyAccessoryConfiguration(data: configData)
-            // Only enable camera assistance if AR session will be available
-            config.isCameraAssistanceEnabled = ARWorldTrackingConfiguration.isSupported
+            // Note: ARKit not available in this project, so camera assistance is disabled
+            config.isCameraAssistanceEnabled = false
             
             configurations[peripheralID] = config
             accessoryDiscoveryTokens[peripheralID] = config.accessoryDiscoveryToken
             
-            if ARWorldTrackingConfiguration.isSupported {
-                addDebugLog("📷 [\(deviceName)] Camera assistance will be enabled")
-            } else {
-                addDebugLog("⚠️ [\(deviceName)] Camera assistance disabled - AR not supported")
-            }
+            addDebugLog("⚠️ [\(deviceName)] Camera assistance disabled - ARKit not available")
             
             addDebugLog("✅ [\(deviceName)] Configuration created successfully")
             
@@ -1577,7 +1515,7 @@ extension BLEManager: CBCentralManagerDelegate {
             uwbLocation.isValid = false
             
             // Reset AR session only when all devices are disconnected
-            arSession = nil
+            // Note: ARKit not available in this project
             isARSessionEnabled = false
         } else {
             // Update connection status to show remaining devices
@@ -2152,8 +2090,7 @@ extension BLEManager: NISessionDelegate {
                     addDebugLog("📷 [\(deviceName)] AR session error detected - retrying UWB without AR...")
                     print("📷 [\(deviceName)] AR session error - retrying without AR enhancement")
                     isARSessionEnabled = false
-                    arSession?.pause()
-                    arSession = nil
+                    // Note: ARKit not available in this project
                     
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         if self.connectedPeripherals[peripheralID] != nil {

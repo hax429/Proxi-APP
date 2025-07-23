@@ -8,6 +8,7 @@ import os.log
 struct FriendsView: View {
     @EnvironmentObject var bleManager: BLEManager
     @EnvironmentObject var friendsManager: FriendsManager
+    @StateObject var simulationManager = SimulationManager()
     @Binding var selectedTab: Int
     @State private var selectedFriendsTab: Int = 0
     @Binding var isSidebarOpen: Bool
@@ -19,21 +20,39 @@ struct FriendsView: View {
     
     private let logger = os.Logger(subsystem: "com.qorvo.ni", category: "FriendsView")
 
-    // Computed property that uses BLEManager connection status
+    // Computed property that uses BLEManager connection status or simulation
     private var hasPairedProxi: Bool {
-        bleManager.isConnected
+        bleManager.isConnected || simulationManager.isSimulationEnabled
     }
     
-    // MARK: - Device Categorization (using BLEManager data)
+    // MARK: - Device Categorization (using BLEManager data or simulation)
     private var connectedDevices: [CBPeripheral] {
-        return Array(bleManager.connectedPeripherals.values)
+        if simulationManager.isSimulationEnabled {
+            // Return simulation devices as connected peripherals
+            return simulationManager.getDeviceIds().compactMap { deviceId in
+                if let fakeDevice = simulationManager.getDeviceData(for: deviceId) {
+                    let mockPeripheral = simulationManager.createMockPeripheral(name: fakeDevice.name, id: deviceId)
+                    // Convert MockPeripheral to CBPeripheral for compatibility
+                    return nil
+                }
+                return nil
+            }
+        } else {
+            return Array(bleManager.connectedPeripherals.values)
+        }
     }
     
     private var discoveredDevices: [CBPeripheral] {
-        return bleManager.discoveredPeripherals.filter { peripheral in
-            !bleManager.connectedPeripherals.keys.contains(peripheral.identifier)
+        if simulationManager.isSimulationEnabled {
+            // In simulation mode, no discovered devices (all are connected)
+            return []
+        } else {
+            return bleManager.discoveredPeripherals.filter { peripheral in
+                !bleManager.connectedPeripherals.keys.contains(peripheral.identifier)
+            }
         }
     }
+    
     
     private var hostDevice: CBPeripheral? {
         // The host device is the first connected device

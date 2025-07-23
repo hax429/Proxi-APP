@@ -82,6 +82,7 @@ struct SettingsView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var bleManager: BLEManager
     @EnvironmentObject var userManager: UserManager
+    @StateObject var simulationManager = SimulationManager()
     @State var showingDebugLog = false
     @State var showingProfile = false
     @State var showingNotifications = false
@@ -580,9 +581,70 @@ extension SettingsView {
             }
             
             VStack(spacing: 12) {
-                // Add debug-specific controls here
-                Text("Debug options available")
-                    .foregroundColor(.white.opacity(0.7))
+                // Fake Device Simulation Button
+                Button(action: {
+                    if simulationManager.isSimulationEnabled {
+                        simulationManager.stopSimulation()
+                    } else {
+                        simulationManager.startSimulation()
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: simulationManager.isSimulationEnabled ? "stop.circle.fill" : "play.circle.fill")
+                            .foregroundColor(simulationManager.isSimulationEnabled ? .red : .green)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(simulationManager.isSimulationEnabled ? "Stop Fake Devices" : "Start Fake Devices")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                            
+                            Text(simulationManager.isSimulationEnabled ? "Simulation active with random data" : "Simulate 3 fake UWB devices")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        
+                        Spacer()
+                        
+                        if simulationManager.isSimulationEnabled {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 8, height: 8)
+                        }
+                    }
+                    .padding()
+                    .background(Color(hex: "232229"))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(simulationManager.isSimulationEnabled ? Color.green.opacity(0.5) : Color.clear, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                if simulationManager.isSimulationEnabled {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Simulation Status")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.green)
+                        
+                        Text("• 3 fake devices with random distance/direction data")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                        
+                        Text("• Data updates every 0.5 seconds")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                        
+                        Text("• Compatible with Friends and UWB views")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding()
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(8)
+                }
             }
         }
     }
