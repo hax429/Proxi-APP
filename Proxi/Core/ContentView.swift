@@ -13,6 +13,8 @@ struct ContentView: View {
     @EnvironmentObject var bleManager: BLEManager
     @EnvironmentObject var friendsManager: FriendsManager
     @EnvironmentObject var userManager: UserManager
+    @State private var uwbTabTapCount = 0
+    @State private var showDebugWindow = false
     
     var body: some View {
         ZStack {
@@ -29,7 +31,7 @@ struct ContentView: View {
                         }
                     }
                     .tag(0)
-                QorvoView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
+                QorvoView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen, showDebugWindow: $showDebugWindow)
                     .tabItem {
                         VStack {
                             Spacer().frame(height: 20)
@@ -39,28 +41,31 @@ struct ContentView: View {
                             Text("UWB Tracker")
                                 .foregroundColor(selectedTab == 1 ? Color.white : Color.white.opacity(1))
                         }
-                    }
-                    .tag(1)
-                DiscoverView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
-                    .tabItem {
-                        VStack {
-                            Spacer().frame(height: 20)
-                            Image(systemName: "person.3")
-                                .renderingMode(.template)
-                                .foregroundColor(selectedTab == 2 ? Color.white : Color.white.opacity(1))
-                            Text("Friends")
-                                .foregroundColor(selectedTab == 2 ? Color.white : Color.white.opacity(1))
+                        .onTapGesture {
+                            handleUWBTabTap()
                         }
                     }
-                    .tag(2)
+                    .tag(1)
                 FriendsView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
                     .tabItem {
                         VStack {
                             Spacer().frame(height: 20)
                             Image(systemName: "magnifyingglass")
                                 .renderingMode(.template)
-                                .foregroundColor(selectedTab == 3 ? Color.white : Color.white.opacity(1))
+                                .foregroundColor(selectedTab == 2 ? Color.white : Color.white.opacity(1))
                             Text("Discover")
+                                .foregroundColor(selectedTab == 2 ? Color.white : Color.white.opacity(1))
+                        }
+                    }
+                    .tag(2)
+                DiscoverView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
+                    .tabItem {
+                        VStack {
+                            Spacer().frame(height: 20)
+                            Image(systemName: "person.3")
+                                .renderingMode(.template)
+                                .foregroundColor(selectedTab == 3 ? Color.white : Color.white.opacity(1))
+                            Text("Friends")
                                 .foregroundColor(selectedTab == 3 ? Color.white : Color.white.opacity(1))
                         }
                     }
@@ -111,6 +116,23 @@ struct ContentView: View {
             UITabBar.appearance().standardAppearance = tabBarAppearance
             if #available(iOS 15.0, *) {
                 UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
+            }
+        }
+    }
+    
+    private func handleUWBTabTap() {
+        uwbTabTapCount += 1
+        
+        if uwbTabTapCount >= 3 {
+            showDebugWindow = true
+            uwbTabTapCount = 0
+            return
+        }
+        
+        // Reset tap count after 2 seconds if not enough taps
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            if self.uwbTabTapCount < 3 {
+                self.uwbTabTapCount = 0
             }
         }
     }

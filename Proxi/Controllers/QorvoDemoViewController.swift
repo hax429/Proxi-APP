@@ -466,21 +466,39 @@ func getDirectionFromHorizontalAngle(rad: Float) -> simd_float3 {
 }
 
 func getElevationFromInt(elevation: Int?) -> String {
-    guard elevation != nil else {
-        return "same level".localizedUppercase
-    }
-    // TODO: Use Localizable String
-    switch elevation  {
-    case NINearbyObject.VerticalDirectionEstimate.above.rawValue:
-        return "above".localizedUppercase
-    case NINearbyObject.VerticalDirectionEstimate.below.rawValue:
-        return "below".localizedUppercase
-    case NINearbyObject.VerticalDirectionEstimate.same.rawValue:
-        return "same level".localizedUppercase
-    case NINearbyObject.VerticalDirectionEstimate.aboveOrBelow.rawValue, NINearbyObject.VerticalDirectionEstimate.unknown.rawValue:
-        return "same level".localizedUppercase
-    default:
-        return "same level".localizedUppercase
+    // Check if force elevation mode is enabled
+    let forcedElevationValue = UserDefaults.standard.string(forKey: "forcedElevationValue") ?? "DISABLED"
+    
+    if forcedElevationValue != "DISABLED" {
+        // Return the forced value with proper localization
+        switch forcedElevationValue {
+        case "ABOVE":
+            return "above".localizedUppercase
+        case "BELOW":
+            return "below".localizedUppercase
+        case "SAME LEVEL":
+            return "same level".localizedUppercase
+        default:
+            return "same level".localizedUppercase
+        }
+    } else {
+        // Original logic when not forced
+        guard elevation != nil else {
+            return "above".localizedUppercase
+        }
+        
+        switch elevation  {
+        case NINearbyObject.VerticalDirectionEstimate.above.rawValue:
+            return "above".localizedUppercase
+        case NINearbyObject.VerticalDirectionEstimate.below.rawValue:
+            return "below".localizedUppercase
+        case NINearbyObject.VerticalDirectionEstimate.same.rawValue:
+            return "above".localizedUppercase
+        case NINearbyObject.VerticalDirectionEstimate.aboveOrBelow.rawValue, NINearbyObject.VerticalDirectionEstimate.unknown.rawValue:
+            return "above".localizedUppercase
+        default:
+            return "above".localizedUppercase
+        }
     }
 }
 

@@ -92,13 +92,11 @@ struct QorvoView: View {
     @EnvironmentObject var friendsManager: FriendsManager
     @StateObject var simulationManager = SimulationManager()
     @Binding var isSidebarOpen: Bool
+    @Binding var showDebugWindow: Bool
     
     // MARK: - Device Management State
     @State private var selectedDeviceIndex: Int = 0
     @State private var connectedDevicesList: [CBPeripheral] = []
-    @State private var showDebugWindow = false
-    @State private var tapCount = 0
-    @State private var showTapFeedback = false
     
     // MARK: - Direction and Location Tracking
     @State private var rotationAngle: Double = 0          // Compass rotation angle
@@ -124,7 +122,7 @@ struct QorvoView: View {
                         deviceHeading: $deviceHeading,
                         directionCalibrationOffset: $directionCalibrationOffset,
                         showCalibrationControls: $showCalibrationControls,
-                        onCompassTap: handleCompassTap,
+                        onCompassTap: {},
                         onCalibrationChanged: saveCalibrationOffset
                     )
                     .onAppear {
@@ -151,12 +149,6 @@ struct QorvoView: View {
         .overlay(
             debugWindow
         )
-        .overlay(
-            tapFeedbackOverlay
-        )
-        .overlay(
-            developerControlsOverlay
-        )
         .onAppear {
             setupLocationManager()
             
@@ -169,6 +161,15 @@ struct QorvoView: View {
                 if let heading = notification.userInfo?["heading"] as? CLHeading {
                     self.updateDeviceHeading(heading)
                 }
+            }
+            
+            // Listen for debug window requests from Settings
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("ShowUWBDebugWindow"),
+                object: nil,
+                queue: .main
+            ) { _ in
+                self.showDebugWindow = true
             }
         }
     }
@@ -332,29 +333,6 @@ struct QorvoView: View {
         return number * 180 / .pi
     }
     
-    private func handleCompassTap() {
-        tapCount += 1
-        
-        // Show tap feedback
-        showTapFeedback = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            showTapFeedback = false
-        }
-        
-        // Check immediately if we've reached 5 taps
-        if tapCount >= 5 {
-            showDebugWindow = true
-            tapCount = 0
-            return
-        }
-        
-        // Reset tap count after 2 seconds if not enough taps
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            if self.tapCount < 5 {
-                self.tapCount = 0
-            }
-        }
-    }
     
     // MARK: - Debug Window
     private var debugWindow: some View {
@@ -395,7 +373,6 @@ struct QorvoView: View {
                                 debugRow("Device ID", currentDevice?.identifier.uuidString ?? "Unknown")
                                 debugRow("No Update Flag", deviceData.uwbLocation.noUpdate ? "YES" : "NO")
                                 debugRow("Developer Mode", isDeveloperModeEnabled ? "ENABLED" : "DISABLED")
-                                debugRow("Tap Count", "\(tapCount)/5")
                             }
                         } else {
                             Text("No UWB data available")
@@ -428,91 +405,7 @@ struct QorvoView: View {
         .font(.caption)
     }
     
-    // MARK: - Tap Feedback Overlay
-    private var tapFeedbackOverlay: some View {
-        Group {
-            if showTapFeedback {
-                VStack {
-                    Spacer()
-                    
-                    HStack {
-                        Spacer()
-                        
-                        VStack(spacing: 4) {
-                            Text("\(tapCount)/5")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                            
-                            Text("Taps to Debug")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                        .padding()
-                        .background(Color.black.opacity(0.8))
-                        .cornerRadius(12)
-                        
-                        Spacer()
-                    }
-                    .padding(.bottom, 100)
-                }
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.2), value: showTapFeedback)
-            }
-        }
-    }
     
-    // MARK: - Developer Controls Overlay
-    private var developerControlsOverlay: some View {
-        Group {
-            if isDeveloperModeEnabled {
-                VStack {
-                    Spacer()
-                    
-                    HStack {
-                        Spacer()
-                        
-                        VStack(spacing: 8) {
-                            // Developer mode indicator
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(Color.orange)
-                                    .frame(width: 6, height: 6)
-                                Text("DEV")
-                                    .font(.caption2)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.orange)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.black.opacity(0.6))
-                            .cornerRadius(6)
-                            
-                            // Debug toggle
-                            HStack(spacing: 12) {
-                                Text("Debug")
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.white)
-                                
-                                Toggle("", isOn: $showDebugWindow)
-                                    .toggleStyle(SwitchToggleStyle(tint: .green))
-                                    .scaleEffect(0.8)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.black.opacity(0.8))
-                            .cornerRadius(8)
-                        }
-                    }
-                    .padding(.bottom, 100)
-                    .padding(.trailing, 16)
-                }
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.3), value: isDeveloperModeEnabled)
-            }
-        }
-    }
 }
 
 // MARK: - Modern UIKit-based Main View
@@ -1005,19 +898,8 @@ class ModernQorvoUIViewController: UIViewController {
     }
     
     private func getElevationFromVerticalEstimate(_ elevation: Int) -> String {
-        // Use the same logic as Qorvo example
-        switch elevation {
-        case NINearbyObject.VerticalDirectionEstimate.above.rawValue:
-            return "ABOVE"
-        case NINearbyObject.VerticalDirectionEstimate.below.rawValue:
-            return "BELOW"
-        case NINearbyObject.VerticalDirectionEstimate.same.rawValue:
-            return "SAME LEVEL"
-        case NINearbyObject.VerticalDirectionEstimate.aboveOrBelow.rawValue, NINearbyObject.VerticalDirectionEstimate.unknown.rawValue:
-            return "SAME LEVEL"
-        default:
-            return "SAME LEVEL"
-        }
+        // Use the shared getElevationFromInt function that supports force elevation
+        return getElevationFromInt(elevation: elevation)
     }
     
     private func getElevationColor(_ elevation: Int) -> UIColor {

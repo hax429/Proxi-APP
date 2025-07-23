@@ -99,6 +99,7 @@ struct SettingsView: View {
 //    @State private var isDeveloperModeEnabled: Bool = UserDefaults.standard.bool(forKey: "isDeveloperModeEnabled")
     @State var isDeveloperModeEnabled: Bool = false
     @State var showingDeveloperModeAlert = false
+    @State var forcedElevationValue: String = UserDefaults.standard.string(forKey: "forcedElevationValue") ?? "DISABLED"
     
     // Scanning state
     @State var discoveredDevicesCount = 0
@@ -645,6 +646,64 @@ extension SettingsView {
                     .background(Color.green.opacity(0.1))
                     .cornerRadius(8)
                 }
+                
+                // Elevation Force Picker
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Force Elevation Value")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                        
+                        Text("Override all elevation values with selected option")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    
+                    Picker("Force Elevation", selection: $forcedElevationValue) {
+                        Text("Disabled").tag("DISABLED")
+                        Text("Same Level").tag("SAME LEVEL")
+                        Text("Above").tag("ABOVE")
+                        Text("Below").tag("BELOW")
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .onChange(of: forcedElevationValue) { value in
+                        UserDefaults.standard.set(value, forKey: "forcedElevationValue")
+                    }
+                }
+                .padding()
+                .background(Color(hex: "232229"))
+                .cornerRadius(12)
+                
+                // UWB Debug Window Toggle
+                Button(action: {
+                    NotificationCenter.default.post(name: NSNotification.Name("ShowUWBDebugWindow"), object: nil)
+                }) {
+                    HStack {
+                        Image(systemName: "terminal.fill")
+                            .foregroundColor(.blue)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Show UWB Debug Window")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                            
+                            Text("Display real-time UWB tracking data")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    .padding()
+                    .background(Color(hex: "232229"))
+                    .cornerRadius(12)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
         }
     }
