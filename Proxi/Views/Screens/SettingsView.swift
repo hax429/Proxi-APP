@@ -103,8 +103,8 @@ struct SettingsView: View {
     @State var discoveredDevicesCount = 0
     @State var connectedDevicesCount = 0
 
-    // Timer for UI updates
-    @State private var timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    // Timer for real-time UI updates
+    @State private var timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
     
     private let logger = os.Logger(subsystem: "com.qorvo.ni", category: "SettingsView")
 
@@ -175,6 +175,10 @@ struct SettingsView: View {
             }
         }
         .onReceive(timer) { _ in
+            updateDeviceCounts()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UWBLocationUpdated"))) { _ in
+            // Immediate refresh when UWB location data changes
             updateDeviceCounts()
         }
     }
@@ -344,9 +348,9 @@ extension SettingsView {
                                 Text(peripheral.name ?? "Unknown Device")
                                     .font(.headline)
                                     .foregroundColor(.white)
-                                Text("Connected")
+                                Text(bleManager.isDeviceRanging(for: peripheral.identifier) ? "Ranging" : "Connected")
                                     .font(.caption)
-                                    .foregroundColor(.green)
+                                    .foregroundColor(bleManager.isDeviceRanging(for: peripheral.identifier) ? .green : .blue)
                                 if isDeveloperModeEnabled {
                                     Text("ID: \(peripheral.identifier)")
                                         .font(.caption)
@@ -356,10 +360,11 @@ extension SettingsView {
                             
                             Spacer()
                             
-                            // Connection Status Indicator
+                            // Connection Status Indicator (shows ranging status)
                             Circle()
-                                .fill(Color.green)
+                                .fill(bleManager.isDeviceRanging(for: peripheral.identifier) ? Color.green : Color.blue)
                                 .frame(width: 12, height: 12)
+                                .animation(.easeInOut(duration: 0.2), value: bleManager.isDeviceRanging(for: peripheral.identifier))
                             
                             // Disconnect Button
                             Button(action: { bleManager.disconnect(peripheralID: peripheral.identifier) }) {
@@ -434,6 +439,50 @@ extension SettingsView {
                 // Discovered Devices List - Only show when no devices are connected
                 if discoveredDevicesCount > 0 && connectedDevicesCount == 0 {
                     VStack(alignment: .leading, spacing: 8) {
+                        // Hardcoded Devices Section for Prototype (Developer Mode Only)
+                        if isDeveloperModeEnabled {
+                            Text("Hardcoded Devices (Prototype)")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.orange)
+                            
+                            ForEach(bleManager.getHardcodedDevices(), id: \.uuid) { device in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(device.name)
+                                        .font(.subheadline)
+                                        .foregroundColor(.white)
+                                    
+                                    Text("UUID: \(device.uuid.uuidString.prefix(8))...")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                }
+                                
+                                Spacer()
+                                
+                                Button("Connect") {
+                                    logger.info("Connecting to hardcoded device: \(device.name)")
+                                    bleManager.connectToHardcodedDevice(uuid: device.uuid)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.blue.opacity(0.3))
+                                .foregroundColor(.white)
+                                .cornerRadius(8)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            
+                            Button("Load Hardcoded Devices") {
+                                bleManager.loadHardcodedDevices()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.orange.opacity(0.3))
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                        }
+                        
                         Text("Discovered Devices")
                             .font(.subheadline)
                             .fontWeight(.semibold)

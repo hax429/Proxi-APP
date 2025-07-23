@@ -12,10 +12,10 @@ struct FriendsView: View {
     @State private var selectedFriendsTab: Int = 0
     @Binding var isSidebarOpen: Bool
     
-    // Timer for checking device connection status
-    @State private var timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    // Real-time updates for distance and status
+    @State private var timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect() // Faster updates
     @State private var connectedDevicesCount = 0
-    @State private var refreshTrigger = false // Force view refresh
+    @State private var refreshTrigger = UUID() // Force view refresh with unique ID
     
     private let logger = os.Logger(subsystem: "com.qorvo.ni", category: "FriendsView")
 
@@ -71,6 +71,12 @@ struct FriendsView: View {
         }
         .onReceive(timer) { _ in
             updateDeviceCounts()
+            // Force real-time UI updates for distance and status
+            refreshTrigger = UUID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UWBLocationUpdated"))) { _ in
+            // Immediate refresh when location data changes
+            refreshTrigger = UUID()
         }
         .onChange(of: connectedDevicesCount) { count in
             if count > 0 {
@@ -97,11 +103,11 @@ struct FriendsView: View {
             updateDeviceCounts()
         }
         
-        // Update UI more frequently for location data (every 500ms)
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+        // Update UI very frequently for real-time distance updates (every 100ms)
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             // Force UI refresh when location data changes
             DispatchQueue.main.async {
-                self.refreshTrigger.toggle() // Toggle to force view refresh
+                self.refreshTrigger = UUID() // New UUID to force view refresh
             }
         }
     }
@@ -114,7 +120,7 @@ struct FriendsView: View {
     private func handleLocationUpdate() {
         // Force UI refresh when location data is updated
         DispatchQueue.main.async {
-            self.refreshTrigger.toggle() // Toggle to force view refresh
+            self.refreshTrigger = UUID() // New UUID to force view refresh
         }
     }
     
@@ -145,12 +151,11 @@ struct FriendsView: View {
         }
         
         // Debug: Print all devices for comparison
-        print("🔍 FriendsView Debug - Total connected devices: \(connectedDevices.count)")
         print("🔍 FriendsView Debug - Total discovered devices: \(discoveredDevices.count)")
         
         // Force refresh trigger to update UI
         DispatchQueue.main.async {
-            self.refreshTrigger.toggle()
+            self.refreshTrigger = UUID()
         }
     }
 
@@ -378,7 +383,7 @@ struct FriendsView: View {
 struct HostDeviceCard: View {
     let peripheral: CBPeripheral
     let bleManager: BLEManager
-    @State private var refreshTrigger: Bool = false
+    @State private var refreshTrigger = UUID()
     @State private var currentDistance: Float = 0.0
     @State private var distanceTimer: Timer?
     
@@ -456,6 +461,7 @@ struct HostDeviceCard: View {
                             .fontWeight(.medium)
                             .foregroundColor(.green)
                     }
+                    .id(refreshTrigger) // Force refresh with unique ID
                     .onAppear {
                         startDistanceUpdates()
                     }
@@ -493,8 +499,8 @@ struct HostDeviceCard: View {
         // Update immediately
         updateDistance()
         
-        // Start timer for frequent updates
-        distanceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+        // Start timer for very frequent updates (real-time)
+        distanceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             updateDistance()
         }
     }
@@ -517,7 +523,7 @@ struct ConnectedDeviceCard: View {
     let peripheral: CBPeripheral
     let bleManager: BLEManager
     let onDisconnect: (UUID) -> Void
-    @State private var refreshTrigger: Bool = false
+    @State private var refreshTrigger = UUID()
     
     var body: some View {
         HStack(spacing: 16) {
@@ -548,7 +554,7 @@ struct ConnectedDeviceCard: View {
                     .font(.subheadline)
                     .foregroundColor(.blue)
                 
-                // Distance display with refresh trigger
+                // Distance display with real-time refresh trigger
                 if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
                     HStack(spacing: 4) {
                         Image(systemName: "location.fill")
@@ -559,7 +565,7 @@ struct ConnectedDeviceCard: View {
                             .fontWeight(.medium)
                             .foregroundColor(.blue)
                     }
-                    .id(refreshTrigger) // Force refresh when trigger changes
+                    .id("distance-\(peripheral.identifier)-\(refreshTrigger)") // Unique ID for real-time updates
                 } else {
                     HStack(spacing: 4) {
                         Image(systemName: "location.slash")

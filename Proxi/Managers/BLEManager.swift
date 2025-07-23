@@ -172,17 +172,49 @@ struct UWBLocation {
             return Float(verticalDirectionEstimate)
         }
         
-        // Standard calculation for full direction support
-        if direction.y != 0 || (direction.x != 0 || direction.z != 0) {
-            let elevationRad = atan2(direction.y, sqrt(direction.x * direction.x + direction.z * direction.z))
-            return elevationRad * 180 / .pi
+        // Improved elevation calculation for full direction support
+        if direction.x != 0 || direction.y != 0 || direction.z != 0 {
+            // Calculate horizontal distance (magnitude in XZ plane)
+            let horizontalDistance = sqrt(direction.x * direction.x + direction.z * direction.z)
+            
+            // Handle edge case where target is directly above/below
+            if horizontalDistance < 0.001 {
+                // Pure vertical direction
+                return direction.y > 0 ? 90.0 : -90.0
+            }
+            
+            // Standard elevation angle calculation
+            // Positive elevation = above, negative = below
+            let elevationRad = atan2(direction.y, horizontalDistance)
+            let elevationDeg = elevationRad * 180 / .pi
+            
+            // Apply smoothing filter to reduce noise
+            let smoothedElevation = applySmoothingFilter(newValue: elevationDeg, previousValue: elevation)
+            
+            return smoothedElevation
         }
         
-        return 0
+        return elevation // Return previous value if no valid direction
     }
     
     var calibratedAzimuth: Float {
         return enhancedAzimuth
+    }
+    
+    // MARK: - Elevation Smoothing Filter
+    private func applySmoothingFilter(newValue: Float, previousValue: Float) -> Float {
+        let smoothingFactor: Float = 0.3 // Adjust between 0.1 (more smoothing) and 0.8 (less smoothing)
+        
+        // Check for significant change to prevent lag
+        let angleDifference = abs(newValue - previousValue)
+        
+        // If change is dramatic (>45 degrees), use less smoothing
+        if angleDifference > 45.0 {
+            return newValue * 0.7 + previousValue * 0.3
+        }
+        
+        // Normal smoothing for small changes
+        return newValue * smoothingFactor + previousValue * (1.0 - smoothingFactor)
     }
     
     // MARK: - Relative bearing calculation (target azimuth relative to device heading)
@@ -222,6 +254,19 @@ class BLEManager: NSObject, ObservableObject {
     private let qorvoServiceUUID = CBUUID(string: "2E938FD0-6A61-11ED-A1EB-0242AC120002")
     private let qorvoRxUUID = CBUUID(string: "2E93998A-6A61-11ED-A1EB-0242AC120002")
     private let qorvoTxUUID = CBUUID(string: "2E939AF2-6A61-11ED-A1EB-0242AC120002")
+    
+    // MARK: - Hardcoded Device List for Prototype
+    private struct HardcodedDevice {
+        let name: String
+        let uuid: UUID
+        let macAddress: String? // Optional MAC address if known
+    }
+    
+    private let hardcodedDevices: [HardcodedDevice] = [
+        HardcodedDevice(name: "Proxi Pilot", uuid: UUID(uuidString: "797FC7EC-5D4A-4797-A7FC-797FC7EC5D4A")!, macAddress: "79:7f:c7:ec:5d:4a"),
+        HardcodedDevice(name: "Gabriel's Pilot", uuid: UUID(uuidString: "87654321-4321-4321-4321-CBA987654321")!, macAddress: nil),
+        HardcodedDevice(name: "Arduino UWB", uuid: UUID(uuidString: "ABCDEF12-3456-7890-ABCD-EF1234567890")!, macAddress: nil)
+    ]
     
     private var centralManager: CBCentralManager!
     // Multiple connection support
@@ -311,6 +356,9 @@ class BLEManager: NSObject, ObservableObject {
     // Protocol timeout timers for each device
     private var protocolTimeoutTimers: [UUID: Timer] = [:]
     
+    // Connection monitoring timers for enhanced stability
+    private var connectionMonitoringTimers: [UUID: Timer] = [:]
+    
     // MARK: - Computed Properties for Compatibility
     var connectedPeripheralID: UUID? {
         return peripheral?.identifier
@@ -347,17 +395,21 @@ class BLEManager: NSObject, ObservableObject {
     deinit {
         consoleLoggingTimer?.invalidate()
         protocolTimeoutTimers.values.forEach { $0.invalidate() }
+        connectionMonitoringTimers.values.forEach { $0.invalidate() }
     }
     
     // MARK: - Console Logging
     private func startConsoleLogging() {
-        // Log all devices data every 5 seconds when devices are connected
-        consoleLoggingTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+        // Log all devices data every 2 seconds for better debugging (reduced from 5 seconds)
+        consoleLoggingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
             if !self.connectedDevicesData.isEmpty {
                 self.logAllDevicesData()
                 
                 // Auto-restart stuck protocols after 60 seconds
                 self.checkAndRestartStuckProtocols()
+                
+                // Send periodic UI update to ensure views stay in sync
+                NotificationCenter.default.post(name: NSNotification.Name("UWBLocationUpdated"), object: nil)
             }
         }
     }
@@ -405,21 +457,51 @@ class BLEManager: NSObject, ObservableObject {
     // MARK: - Public Methods
     func startScanning() {
         guard centralManager.state == .poweredOn else {
-            addDebugLog("❌ Cannot scan - Bluetooth not powered on")
+            addDebugLog("❌ Cannot scan - Bluetooth not powered on (State: \(centralManager.state.rawValue))")
+            print("❌ Cannot scan - Bluetooth not powered on (State: \(centralManager.state.rawValue))")
             return
         }
         
         discoveredPeripherals.removeAll()
         isScanning = true
         updateProtocolState("Scanning")
-        addDebugLog("🔍 Scanning for multiple Arduino UWB devices...")
-        print("🔍 Starting scan for multiple Arduino UWB devices...")
         
-        // Scan for both service UUIDs
+        // COMPREHENSIVE DEBUGGING
+        addDebugLog("🔍 STARTING BLE SCAN WITH FULL DEBUGGING")
+        print("🔍 STARTING BLE SCAN WITH FULL DEBUGGING")
+        print("📡 Central Manager State: \(centralManager.state.rawValue)")
+        print("📡 Target Service UUIDs:")
+        print("   - Transfer Service: \(transferServiceUUID.uuidString)")
+        print("   - Qorvo Service: \(qorvoServiceUUID.uuidString)")
+        print("📡 Hardcoded Devices:")
+        for device in hardcodedDevices {
+            print("   - \(device.name): \(device.uuid)")
+        }
+        print("📡 Scan Options: AllowDuplicates=false")
+        print("📡 Expected Arduino Name: 'Proxi Pilot'")
+        print("📡 Expected Arduino UUID: 797FC7EC-5D4A-4797-A7FC-797FC7EC5D4A")
+        
+        addDebugLog("🔍 Scanning for hardcoded and Pilot devices...")
+        
+        // Start the actual scan
         centralManager.scanForPeripherals(
-            withServices: [transferServiceUUID, qorvoServiceUUID],
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+            withServices: [transferServiceUUID, qorvoServiceUUID],  // Scan for UWB services
+            options: [
+                CBCentralManagerScanOptionAllowDuplicatesKey: false,
+                CBCentralManagerScanOptionSolicitedServiceUUIDsKey: [transferServiceUUID, qorvoServiceUUID]
+            ]
         )
+        
+        // Add a timer to check scan progress
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            self.logScanProgress()
+        }
+        
+        // TODO: After debugging, restore filtered scan:
+        // centralManager.scanForPeripherals(
+        //     withServices: [transferServiceUUID, qorvoServiceUUID],
+        //     options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+        // )
     }
     
     func stopScanning() {
@@ -427,6 +509,183 @@ class BLEManager: NSObject, ObservableObject {
         isScanning = false
         addDebugLog("⏹️ Stopped scanning")
         print("⏹️ Stopped scanning for more Arduino devices")
+    }
+    
+    // MARK: - Hardcoded Device Methods for Prototype
+    
+    /**
+     * Load hardcoded devices as if they were discovered
+     * This bypasses the discovery process for prototyping
+     */
+    func loadHardcodedDevices() {
+        addDebugLog("🔧 PROTOTYPE MODE: Loading hardcoded devices...")
+        print("🔧 PROTOTYPE MODE: Loading hardcoded devices...")
+        
+        discoveredPeripherals.removeAll()
+        
+        // Create mock peripherals for hardcoded devices
+        for device in hardcodedDevices {
+            addDebugLog("📱 HARDCODED: \(device.name) | UUID: \(device.uuid)")
+            print("📱 HARDCODED: \(device.name) | UUID: \(device.uuid)")
+        }
+        
+        updateProtocolState("Hardcoded Devices Loaded")
+        addDebugLog("✅ Loaded \(hardcodedDevices.count) hardcoded devices")
+    }
+    
+    /**
+     * Connect to a hardcoded device by UUID
+     */
+    func connectToHardcodedDevice(uuid: UUID) {
+        guard let device = hardcodedDevices.first(where: { $0.uuid == uuid }) else {
+            addDebugLog("❌ Hardcoded device not found: \(uuid)")
+            return
+        }
+        
+        addDebugLog("🔗 Attempting to connect to hardcoded device: \(device.name)")
+        print("🔗 Attempting to connect to hardcoded device: \(device.name)")
+        print("🔗 Target UUID: \(uuid)")
+        if let macAddress = device.macAddress {
+            print("🔗 Target MAC: \(macAddress)")
+        }
+        
+        // Method 1: Check if Central Manager knows about this peripheral by UUID
+        let knownPeripherals = centralManager.retrievePeripherals(withIdentifiers: [uuid])
+        
+        if let peripheral = knownPeripherals.first {
+            addDebugLog("✅ Found known peripheral by UUID: \(peripheral.name ?? device.name)")
+            connect(to: peripheral)
+            return
+        }
+        
+        // Method 2: Check if we can find it in connected peripherals
+        if let existingPeripheral = connectedPeripherals[uuid] {
+            addDebugLog("✅ Found in connected peripherals: \(existingPeripheral.name ?? device.name)")
+            connect(to: existingPeripheral)
+            return
+        }
+        
+        // Method 3: Check discovered peripherals for matching name
+        if let discoveredPeripheral = discoveredPeripherals.first(where: { $0.name == device.name }) {
+            addDebugLog("✅ Found in discovered peripherals: \(discoveredPeripheral.name ?? device.name)")
+            connect(to: discoveredPeripheral)
+            return
+        }
+        
+        // Method 4: Fall back to targeted scanning
+        addDebugLog("⚠️ Device not found in cache, starting targeted scan...")
+        startScanningForHardcodedDevice(deviceName: device.name)
+    }
+    
+    /**
+     * Scan specifically for a hardcoded device by name
+     */
+    private func startScanningForHardcodedDevice(deviceName: String) {
+        guard centralManager.state == .poweredOn else {
+            addDebugLog("❌ Cannot scan - Bluetooth not powered on")
+            return
+        }
+        
+        isScanning = true
+        updateProtocolState("Scanning for \(deviceName)")
+        addDebugLog("🔍 Scanning specifically for: \(deviceName)")
+        
+        // Scan for specific services the device should advertise
+        centralManager.scanForPeripherals(
+            withServices: [transferServiceUUID, qorvoServiceUUID],
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+        )
+    }
+    
+    /**
+     * Get list of hardcoded devices for UI
+     */
+    func getHardcodedDevices() -> [(name: String, uuid: UUID)] {
+        return hardcodedDevices.map { (name: $0.name, uuid: $0.uuid) }
+    }
+    
+    /**
+     * Log scan progress and status
+     */
+    private func logScanProgress() {
+        addDebugLog("📊 SCAN PROGRESS REPORT (5 seconds elapsed)")
+        print("📊 SCAN PROGRESS REPORT (5 seconds elapsed)")
+        print("📱 Discovered Devices Count: \(discoveredPeripherals.count)")
+        print("📱 Is Scanning: \(isScanning)")
+        print("📱 Central Manager State: \(centralManager.state.rawValue)")
+        
+        if discoveredPeripherals.isEmpty {
+            print("⚠️  NO DEVICES DISCOVERED YET")
+            print("🔧 Troubleshooting suggestions:")
+            print("   1. Ensure Arduino is powered on and running")
+            print("   2. Check Arduino serial output for advertising confirmation")
+            print("   3. Verify Arduino is advertising UWB services")
+            print("   4. Try moving devices closer together")
+            print("   5. Check if other BLE apps can see the Arduino")
+            
+            // Try a broader scan
+            addDebugLog("🔍 Attempting broader scan (all services)")
+            print("🔍 Attempting broader scan (all services)")
+            centralManager.stopScan()
+            centralManager.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+            
+            // Check again in 10 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
+                self.logBroadScanResults()
+            }
+        } else {
+            print("✅ Found \(discoveredPeripherals.count) device(s):")
+            for peripheral in discoveredPeripherals {
+                print("   - \(peripheral.name ?? "Unknown"): \(peripheral.identifier)")
+            }
+        }
+    }
+    
+    /**
+     * Log results of broad scan (all services)
+     */
+    private func logBroadScanResults() {
+        addDebugLog("📊 BROAD SCAN RESULTS (15 seconds total)")
+        print("📊 BROAD SCAN RESULTS (15 seconds total)")
+        print("📱 Total Devices Found: \(discoveredPeripherals.count)")
+        
+        if discoveredPeripherals.isEmpty {
+            print("❌ CRITICAL: No BLE devices found at all")
+            print("🔧 This suggests:")
+            print("   - Arduino is not advertising")
+            print("   - Bluetooth permission issues")
+            print("   - Hardware problems")
+        } else {
+            print("📱 All Discovered Devices:")
+            for peripheral in discoveredPeripherals {
+                print("   - Name: \(peripheral.name ?? "Unknown")")
+                print("     UUID: \(peripheral.identifier)")
+                print("     RSSI: [check advertisement data]")
+            }
+            
+            // Check if any match our hardcoded devices
+            let matchingDevices = discoveredPeripherals.filter { peripheral in
+                hardcodedDevices.contains { $0.name == peripheral.name }
+            }
+            
+            if !matchingDevices.isEmpty {
+                print("✅ Found matching hardcoded devices:")
+                for device in matchingDevices {
+                    print("   - \(device.name ?? "Unknown"): \(device.identifier)")
+                }
+            } else {
+                print("⚠️  No hardcoded devices found in scan")
+            }
+        }
+        
+        // Resume targeted scanning
+        centralManager.stopScan()
+        if isScanning {
+            centralManager.scanForPeripherals(
+                withServices: [transferServiceUUID, qorvoServiceUUID],
+                options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+            )
+        }
     }
     
     func continueScanningForMoreDevices() {
@@ -482,8 +741,9 @@ class BLEManager: NSObject, ObservableObject {
             accessoryDiscoveryTokens.removeValue(forKey: peripheralID)
         }
         
-        // Cancel any pending timeout timers
+        // Cancel any pending timeout timers and monitoring
         cancelProtocolTimeoutTimer(for: peripheralID)
+        stopConnectionMonitoring(for: peripheralID)
         
         // Remove device data
         connectedDevicesData[peripheralID]?.isRanging = false
@@ -633,8 +893,11 @@ class BLEManager: NSObject, ObservableObject {
             print("📤 [\(deviceName)] Sending INITIALIZE command")
             self.sendMessage(.initialize, to: peripheralID)
             
-            // Start timeout timer for protocol initialization
-            self.startProtocolTimeoutTimer(for: peripheralID, timeoutSeconds: 30)
+            // Start timeout timer for protocol initialization (reduced for faster recovery)
+            self.startProtocolTimeoutTimer(for: peripheralID, timeoutSeconds: 20)
+            
+            // Start connection monitoring for stability
+            self.startConnectionMonitoring(for: peripheralID)
         }
         
         if connectedPeripherals.count == 1 {
@@ -1041,8 +1304,16 @@ class BLEManager: NSObject, ObservableObject {
             print("⏰ [\(deviceName)] Protocol timeout - retrying initialization")
             self.addDebugLog("⏰ [\(deviceName)] Protocol timeout after \(timeoutSeconds)s - retrying")
             
-            // Retry protocol initialization
-            self.retryUWBInitialization(for: peripheralID)
+            // Enhanced retry with connection health check
+            if let peripheral = self.connectedPeripherals[peripheralID] {
+                if peripheral.state == .connected {
+                    self.retryUWBInitialization(for: peripheralID)
+                } else {
+                    // Connection lost, attempt reconnection
+                    self.addDebugLog("🔄 [\(deviceName)] Connection lost during timeout - attempting reconnection")
+                    self.connect(to: peripheral)
+                }
+            }
         }
         
         protocolTimeoutTimers[peripheralID] = timer
@@ -1057,6 +1328,56 @@ class BLEManager: NSObject, ObservableObject {
             let deviceName = connectedPeripherals[peripheralID]?.name ?? "Unknown"
             print("✅ [\(deviceName)] Protocol timeout timer cancelled")
         }
+    }
+    
+    // MARK: - Connection Monitoring for Enhanced Stability
+    private func startConnectionMonitoring(for peripheralID: UUID) {
+        // Cancel existing monitoring if any
+        stopConnectionMonitoring(for: peripheralID)
+        
+        let deviceName = connectedPeripherals[peripheralID]?.name ?? "Unknown"
+        
+        // Monitor connection health every 5 seconds
+        let timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            self.checkConnectionHealth(for: peripheralID)
+        }
+        
+        connectionMonitoringTimers[peripheralID] = timer
+        print("💓 [\(deviceName)] Started connection monitoring")
+    }
+    
+    private func stopConnectionMonitoring(for peripheralID: UUID) {
+        if let timer = connectionMonitoringTimers[peripheralID] {
+            timer.invalidate()
+            connectionMonitoringTimers.removeValue(forKey: peripheralID)
+            
+            let deviceName = connectedPeripherals[peripheralID]?.name ?? "Unknown"
+            print("🛑 [\(deviceName)] Stopped connection monitoring")
+        }
+    }
+    
+    private func checkConnectionHealth(for peripheralID: UUID) {
+        guard let peripheral = connectedPeripherals[peripheralID] else { return }
+        let deviceName = peripheral.name ?? "Unknown"
+        
+        // Check if peripheral is still connected
+        if peripheral.state != .connected {
+            addDebugLog("⚠️ [\(deviceName)] Connection lost - attempting reconnection")
+            stopConnectionMonitoring(for: peripheralID)
+            connect(to: peripheral)
+            return
+        }
+        
+        // Check if we have valid characteristics
+        guard let characteristics = peripheralCharacteristics[peripheralID],
+              characteristics.rx != nil else {
+            addDebugLog("⚠️ [\(deviceName)] Lost characteristic - rediscovering services")
+            peripheral.discoverServices([transferServiceUUID, qorvoServiceUUID])
+            return
+        }
+        
+        // Optional: Send a lightweight ping message to test communication
+        // This can help detect silent connection failures
     }
     
     // MARK: - Manual Protocol Restart (for debugging)
@@ -1124,11 +1445,62 @@ extension BLEManager: CBCentralManagerDelegate {
     
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                        advertisementData: [String : Any], rssi RSSI: NSNumber) {
-        addDebugLog("📱 Found: \(peripheral.name ?? "Unknown") RSSI: \(RSSI)")
+        let deviceName = peripheral.name ?? "Unknown Device"
+        let serviceUUIDs = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
+        let serviceUUIDStrings = serviceUUIDs.map { $0.uuidString }
+        
+        // COMPREHENSIVE DISCOVERY LOGGING
+        print("🔍 RAW DISCOVERY EVENT:")
+        print("   Device Name: '\(deviceName)'")
+        print("   UUID: \(peripheral.identifier)")
+        print("   RSSI: \(RSSI)")
+        print("   Services: \(serviceUUIDStrings)")
+        print("   Advertisement Data Keys: \(advertisementData.keys)")
+        
+        // Check against target criteria
+        let isHardcodedDevice = hardcodedDevices.contains { $0.name == deviceName }
+        let isValidPilotDevice = deviceName.hasSuffix("Pilot")
+        let isTargetArduino = deviceName == "Proxi Pilot"
+        
+        print("   Is Hardcoded Device: \(isHardcodedDevice)")
+        print("   Is Valid Pilot Device: \(isValidPilotDevice)")
+        print("   Is Target Arduino: \(isTargetArduino)")
+        
+        // Check service UUID matches
+        let hasTransferService = serviceUUIDs.contains(transferServiceUUID)
+        let hasQorvoService = serviceUUIDs.contains(qorvoServiceUUID)
+        print("   Has Transfer Service: \(hasTransferService)")
+        print("   Has Qorvo Service: \(hasQorvoService)")
+        
+        // Filter out unknown devices only
+        if deviceName == "Unknown Device" || deviceName.isEmpty {
+            print("   ❌ FILTERED OUT: Unknown or empty device name")
+            return
+        }
+        
+        // Accept all named devices (removed Pilot filter requirement)
+        print("   ✅ ACCEPTING: Any device with a name")
+        
+        // Device passed filters
+        addDebugLog("📱 ✅ DEVICE PASSED FILTERS: \(deviceName)")
+        print("📱 ✅ DEVICE PASSED FILTERS: \(deviceName)")
+        print("📡 Full Advertisement Data: \(advertisementData)")
         
         if !discoveredPeripherals.contains(peripheral) {
             discoveredPeripherals.append(peripheral)
+            addDebugLog("✅ Added to discovered devices list (Total: \(discoveredPeripherals.count))")
+            print("✅ Added to discovered devices list (Total: \(discoveredPeripherals.count))")
+            
+            // Special handling for target Arduino
+            if isTargetArduino {
+                print("🎯 TARGET ARDUINO FOUND! \(deviceName)")
+                addDebugLog("🎯 TARGET ARDUINO FOUND! \(deviceName)")
+            }
+        } else {
+            print("⚠️  Device already in discovered list")
         }
+        
+        print("") // Add spacing between discoveries
     }
     
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
@@ -1525,6 +1897,13 @@ extension BLEManager: NISessionDelegate {
                 deviceData.uwbLocation.isConverged = self.isConverged
                 deviceData.lastUpdated = Date()
                 
+                // Send real-time notification for UI updates
+                NotificationCenter.default.post(name: NSNotification.Name("UWBLocationUpdated"), object: nil, userInfo: [
+                    "peripheralID": peripheralID,
+                    "distance": deviceData.uwbLocation.distance,
+                    "isRanging": deviceData.isRanging
+                ])
+                
                 let azimuthDeg = deviceData.uwbLocation.azimuth
                 let elevationDeg = deviceData.uwbLocation.elevation
                 let relativeBearing = deviceData.uwbLocation.relativeBearing
@@ -1553,6 +1932,12 @@ extension BLEManager: NISessionDelegate {
             
             // Update the device data in the dictionary
             self.connectedDevicesData[peripheralID] = deviceData
+            
+            // Send immediate UI update notification
+            DispatchQueue.main.async {
+                // Force SwiftUI view updates
+                self.objectWillChange.send()
+            }
         }
     }
     
@@ -1715,8 +2100,9 @@ extension BLEManager: NISessionDelegate {
         configurations.removeValue(forKey: peripheralID)
         accessoryDiscoveryTokens.removeValue(forKey: peripheralID)
         
-        // Cancel any pending timeout timers
+        // Cancel any pending timeout timers and monitoring
         cancelProtocolTimeoutTimer(for: peripheralID)
+        stopConnectionMonitoring(for: peripheralID)
         
         // Update global state
         let anyDeviceRanging = connectedDevicesData.values.contains { $0.isRanging }

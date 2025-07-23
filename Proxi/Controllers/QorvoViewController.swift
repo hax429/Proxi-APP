@@ -174,8 +174,11 @@ struct QorvoView: View {
     
     // MARK: - Helper Methods
     private func startDeviceMonitoring() {
-        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+        // Real-time monitoring with very fast updates for responsive direction tracking
+        Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
             updateDeviceState()
+            // Post notification for immediate UI updates
+            NotificationCenter.default.post(name: NSNotification.Name("UWBLocationUpdated"), object: nil)
         }
     }
     
@@ -227,7 +230,14 @@ struct QorvoView: View {
                     let normalizedDifference = atan2(sin(angleDifference * .pi / 180), cos(angleDifference * .pi / 180)) * 180 / .pi
                     
                     rotationAngle = currentAngle + (normalizedDifference * 0.8)
-                    elevation = Int(deviceData.uwbLocation.elevation)
+                    
+                    // Calculate elevation using the same logic as Qorvo example
+                    let elevationValue = calculateElevation(direction)
+                    var calculatedElevation = Int(90 * Double(elevationValue))
+                    if !Settings().isDirectionEnable {
+                        // Use verticalDirectionEstimate like Qorvo example\n                        calculatedElevation = deviceData.uwbLocation.verticalDirectionEstimate
+                    }
+                    elevation = calculatedElevation
                 }
             }
         } else {
@@ -242,6 +252,14 @@ struct QorvoView: View {
         } else {
             return atan2(direction.x, direction.z)
         }
+    }
+    
+    private func calculateElevation(_ direction: simd_float3) -> Float {
+        return atan2(direction.z, direction.y) + .pi / 2
+    }
+    
+    private func rad2deg(_ number: Double) -> Double {
+        return number * 180 / .pi
     }
     
     private func handleCompassTap() {
@@ -869,7 +887,7 @@ class ModernQorvoUIViewController: UIViewController {
     }
     
     func updateRotation(_ angle: Double) {
-        UIView.animate(withDuration: 0.1, delay: 0, options: .curveEaseInOut, animations: {
+        UIView.animate(withDuration: 0.05, delay: 0, options: .curveEaseInOut, animations: {
             self.compassImageView.transform = CGAffineTransform(rotationAngle: CGFloat(angle * .pi / 180))
         }, completion: nil)
         
@@ -877,7 +895,7 @@ class ModernQorvoUIViewController: UIViewController {
     }
     
     func updateElevation(_ elevation: Int) {
-        let elevationText = getElevationText(elevation)
+        let elevationText = getElevationFromVerticalEstimate(elevation)
         let elevationColor = getElevationColor(elevation)
         
         elevationLabel?.text = elevationText
@@ -915,11 +933,27 @@ class ModernQorvoUIViewController: UIViewController {
         return elevationRad * 180 / .pi
     }
     
+    private func getElevationFromVerticalEstimate(_ elevation: Int) -> String {
+        // Use the same logic as Qorvo example
+        switch elevation {
+        case NINearbyObject.VerticalDirectionEstimate.above.rawValue:
+            return "ABOVE"
+        case NINearbyObject.VerticalDirectionEstimate.below.rawValue:
+            return "BELOW"
+        case NINearbyObject.VerticalDirectionEstimate.same.rawValue:
+            return "SAME LEVEL"
+        case NINearbyObject.VerticalDirectionEstimate.aboveOrBelow.rawValue, NINearbyObject.VerticalDirectionEstimate.unknown.rawValue:
+            return "UNKNOWN"
+        default:
+            return "UNKNOWN"
+        }
+    }
+    
     private func getElevationColor(_ elevation: Int) -> UIColor {
         switch elevation {
-        case 1: return .systemBlue
-        case -1: return .systemOrange
-        case 0: return .systemGreen
+        case NINearbyObject.VerticalDirectionEstimate.above.rawValue: return .systemBlue
+        case NINearbyObject.VerticalDirectionEstimate.below.rawValue: return .systemOrange
+        case NINearbyObject.VerticalDirectionEstimate.same.rawValue: return .systemGreen
         default: return .systemGray
         }
     }
@@ -1055,8 +1089,9 @@ struct CompactDeviceCard: View {
                     let isRanging = deviceData?.isRanging ?? false
                     
                     Circle()
-                        .fill(isHostDevice ? Color.green : Color.blue)
+                        .fill(isRanging ? (isHostDevice ? Color.green : Color.blue) : Color.gray)
                         .frame(width: 6, height: 6)
+                        .animation(.easeInOut(duration: 0.2), value: isRanging) // Animate status changes
                     
                     Text(peripheral.name ?? "Unknown Device")
                         .font(.caption)
@@ -1072,6 +1107,7 @@ struct CompactDeviceCard: View {
                         .font(.caption2)
                         .fontWeight(.semibold)
                         .foregroundColor(isHostDevice ? .green : .blue)
+                        .animation(.easeInOut(duration: 0.1), value: distance) // Smooth distance updates
                 } else {
                     Text("...")
                         .font(.caption2)
