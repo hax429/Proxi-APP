@@ -34,22 +34,9 @@
 		A9F841D22E2879A200B03B96 /* ProxiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProxiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		A9BDBFB22E303F6F00DA9738 /* Exceptions for "Proxi" folder in "Proxi" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = A9F841B92E2879A000B03B96 /* Proxi */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A9F841BC2E2879A000B03B96 /* Proxi */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				A9BDBFB22E303F6F00DA9738 /* Exceptions for "Proxi" folder in "Proxi" target */,
-			);
 			path = Proxi;
 			sourceTree = "<group>";
 		};
@@ -425,7 +412,6 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Proxi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Proxi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This app needs Bluetooth";
@@ -472,7 +458,6 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Proxi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Proxi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This app needs Bluetooth";

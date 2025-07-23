@@ -980,9 +980,9 @@ class ModernQorvoUIViewController: UIViewController {
         case NINearbyObject.VerticalDirectionEstimate.same.rawValue:
             return "SAME LEVEL"
         case NINearbyObject.VerticalDirectionEstimate.aboveOrBelow.rawValue, NINearbyObject.VerticalDirectionEstimate.unknown.rawValue:
-            return "UNKNOWN"
+            return "SAME LEVEL"
         default:
-            return "UNKNOWN"
+            return "SAME LEVEL"
         }
     }
     
@@ -991,7 +991,7 @@ class ModernQorvoUIViewController: UIViewController {
         case NINearbyObject.VerticalDirectionEstimate.above.rawValue: return .systemBlue
         case NINearbyObject.VerticalDirectionEstimate.below.rawValue: return .systemOrange
         case NINearbyObject.VerticalDirectionEstimate.same.rawValue: return .systemGreen
-        default: return .systemGray
+        default: return .systemGreen
         }
     }
     
