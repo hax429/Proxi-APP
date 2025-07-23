@@ -85,6 +85,17 @@ struct FriendsView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
+                            // Page title
+                            HStack {
+                                Text("Discover")
+                                    .font(.largeTitle)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                Spacer()
+                            }
+                            .padding(.horizontal)
+                            .padding(.top, 10)
+                            
                             // Simplified sections
                             connectedDevicesSection
                             incomingRequestsSection

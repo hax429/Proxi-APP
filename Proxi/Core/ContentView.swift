@@ -41,7 +41,7 @@ struct ContentView: View {
                         }
                     }
                     .tag(1)
-                FriendsView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
+                DiscoverView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
                     .tabItem {
                         VStack {
                             Spacer().frame(height: 20)
@@ -53,7 +53,7 @@ struct ContentView: View {
                         }
                     }
                     .tag(2)
-                DiscoverView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
+                FriendsView(selectedTab: $selectedTab, isSidebarOpen: $isSidebarOpen)
                     .tabItem {
                         VStack {
                             Spacer().frame(height: 20)

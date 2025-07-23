@@ -7,15 +7,15 @@ struct DiscoverView: View {
     @EnvironmentObject var bleManager: BLEManager
     @EnvironmentObject var friendsManager: FriendsManager
     
-    // Sample data for discovered users
+    // Demo data for friends you've connected to before
     @State private var discoveredUsers: [DiscoveredUser] = [
         DiscoveredUser(
             id: "1",
             name: "Alex Chen",
-            status: "Working",
+            status: "In a Meeting",
             statusEmoji: "💼",
-            distance: "2.3m",
-            playlist: "Lo-Fi Beats",
+            distance: "15.7m",
+            playlist: "Lo-Fi Focus",
             isOnline: true,
             profileImage: nil as UIImage?
         ),
@@ -24,8 +24,8 @@ struct DiscoverView: View {
             name: "Sarah Kim",
             status: "Studying",
             statusEmoji: "📚",
-            distance: "5.1m",
-            playlist: "Classical Focus",
+            distance: "127.3m",
+            playlist: "Classical Study",
             isOnline: true,
             profileImage: nil as UIImage?
         ),
@@ -34,8 +34,8 @@ struct DiscoverView: View {
             name: "Mike Rodriguez",
             status: "Gaming",
             statusEmoji: "🎮",
-            distance: "8.7m",
-            playlist: "Epic Soundtracks",
+            distance: "Last seen 2h ago",
+            playlist: "Epic Gaming Mix",
             isOnline: false,
             profileImage: nil as UIImage?
         ),
@@ -44,8 +44,8 @@ struct DiscoverView: View {
             name: "Emma Wilson",
             status: "Working Out",
             statusEmoji: "🏃‍♀️",
-            distance: "12.4m",
-            playlist: "High Energy Mix",
+            distance: "2.1km",
+            playlist: "Workout Hits",
             isOnline: true,
             profileImage: nil as UIImage?
         ),
@@ -54,8 +54,38 @@ struct DiscoverView: View {
             name: "David Park",
             status: "Coffee Break",
             statusEmoji: "☕",
-            distance: "3.2m",
-            playlist: "Chill Vibes",
+            distance: "89.4m",
+            playlist: "Chill Afternoon",
+            isOnline: true,
+            profileImage: nil as UIImage?
+        ),
+        DiscoveredUser(
+            id: "6",
+            name: "Katie Williams",
+            status: "Happy",
+            statusEmoji: "😊",
+            distance: "6.2m",
+            playlist: "Feel Good Hits",
+            isOnline: true,
+            profileImage: nil as UIImage?
+        ),
+        DiscoveredUser(
+            id: "7",
+            name: "Ryan Cooper",
+            status: "Coding",
+            statusEmoji: "👨‍💻",
+            distance: "Last seen 30m ago",
+            playlist: "Deep Focus",
+            isOnline: false,
+            profileImage: nil as UIImage?
+        ),
+        DiscoveredUser(
+            id: "8",
+            name: "Zoe Martinez",
+            status: "Commuting",
+            statusEmoji: "🚊",
+            distance: "4.7km",
+            playlist: "Travel Tunes",
             isOnline: true,
             profileImage: nil as UIImage?
         )
@@ -81,9 +111,24 @@ struct DiscoverView: View {
             return filtered.filter { $0.isOnline }
         case .nearby:
             return filtered.filter { 
-                if let distance = Double($0.distance.replacingOccurrences(of: "m", with: "")) {
-                    return distance <= 10.0
+                // Only include friends with actual distance measurements (not "Last seen" text)
+                if $0.distance.contains("Last seen") {
+                    return false
                 }
+                
+                let distanceString = $0.distance
+                
+                // Handle kilometers - convert to meters for comparison
+                if distanceString.contains("km") {
+                    if let distance = Double(distanceString.replacingOccurrences(of: "km", with: "")) {
+                        return distance * 1000 <= 200.0 // 200m or less is considered nearby
+                    }
+                }
+                // Handle meters
+                else if let distance = Double(distanceString.replacingOccurrences(of: "m", with: "")) {
+                    return distance <= 200.0 // 200m or less is considered nearby
+                }
+                
                 return false
             }
         }
@@ -117,12 +162,12 @@ struct DiscoverView: View {
         VStack(spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Discover")
+                    Text("Friends")
                         .font(.title)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
                     
-                    Text("Find people nearby using Proxi")
+                    Text("See your friends and their status")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.7))
                 }
@@ -157,7 +202,7 @@ struct DiscoverView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.white.opacity(0.6))
                 
-                TextField("Search people, status, or playlists...", text: $searchText)
+                TextField("Search friends, status, or playlists...", text: $searchText)
                     .foregroundColor(.white)
                     .textFieldStyle(PlainTextFieldStyle())
             }
@@ -186,14 +231,14 @@ struct DiscoverView: View {
     private var discoveredUsersSection: some View {
         VStack(spacing: 16) {
             HStack {
-                Text("People Nearby")
+                Text("Your Friends")
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 
                 Spacer()
                 
-                Text("\(filteredUsers.count) found")
+                Text("\(filteredUsers.count) friends")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.6))
                     .padding(.horizontal, 8)
@@ -221,7 +266,7 @@ struct DiscoverView: View {
                 .font(.system(size: 40))
                 .foregroundColor(.white.opacity(0.4))
             
-            Text("No people found")
+            Text("No friends found")
                 .font(.headline)
                 .foregroundColor(.white)
             
@@ -369,11 +414,11 @@ struct DiscoveredUserCard: View {
             
             // Action Button
             Button(action: {
-                // Send friend request or view profile
+                // Message friend or view profile
             }) {
-                Image(systemName: "plus.circle.fill")
+                Image(systemName: user.isOnline ? "message.circle.fill" : "person.circle.fill")
                     .font(.title2)
-                    .foregroundColor(.blue)
+                    .foregroundColor(user.isOnline ? .blue : .gray)
             }
         }
         .padding()
