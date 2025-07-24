@@ -3,8 +3,10 @@
 
 // Enhanced multi-device support
 #define MAX_CONNECTED_DEVICES 8
-#define HEARTBEAT_INTERVAL 5000  // 5 seconds
-#define CONNECTION_TIMEOUT 30000  // 30 seconds
+#define HEARTBEAT_INTERVAL 1000  // 1 second for faster updates
+#define CONNECTION_TIMEOUT 10000  // 10 seconds for quicker timeout detection
+#define KEEPALIVE_INTERVAL 2000   // 2 seconds keepalive ping
+#define ADVERTISE_CHECK_INTERVAL 1000  // Check advertising every second
 
 // Device tracking structure
 struct ConnectedDevice {
@@ -21,9 +23,15 @@ ConnectedDevice connectedDevices[MAX_CONNECTED_DEVICES];
 uint8_t deviceCount = 0;
 bool uwbInitialized = false;
 unsigned long lastHeartbeat = 0;
+unsigned long lastKeepalive = 0;
+unsigned long lastAdvertiseCheck = 0;
 
 // Device ID counter for unique identification
 uint8_t nextDeviceId = 1;
+
+// CRITICAL: Track advertising state explicitly
+bool isAdvertising = false;
+bool shouldBeAdvertising = true;
 
 /**
  * @brief Find device in connected devices array
@@ -145,6 +153,26 @@ uint8_t getActiveDeviceCount() {
 }
 
 /**
+ * @brief Send keepalive signal to maintain active connections
+ */
+void sendKeepalive() {
+  // Update activity for all connected devices to prevent timeout
+  for (int i = 0; i < deviceCount; i++) {
+    if (connectedDevices[i].isActive) {
+      connectedDevices[i].lastActivity = millis();
+    }
+  }
+  
+  // Optional: Send a lightweight ping message to active sessions
+  // This helps detect silent connection failures early
+  if (getActiveDeviceCount() > 0) {
+    Serial.print("💓 Keepalive sent to ");
+    Serial.print(getActiveDeviceCount());
+    Serial.println(" active sessions");
+  }
+}
+
+/**
  * @brief notification handler for ranging data
  * @param rangingData the received data
  */
@@ -173,8 +201,11 @@ void rangingHandler(UWBRangingData &rangingData) {
  * @param dev the client BLE device
  */
 void clientConnected(BLEDevice dev) {
-  Serial.print("BLE Client connected: ");
+  Serial.println("📱 ========== CLIENT CONNECTED EVENT ==========");
+  Serial.print("📱 BLE Client connected: ");
   Serial.println(dev.address());
+  Serial.print("📱 Device count before adding: ");
+  Serial.println(deviceCount);
   
   // Add device to tracking array
   if (!addDevice(dev)) {
@@ -184,11 +215,40 @@ void clientConnected(BLEDevice dev) {
   
   // Initialize UWB stack upon first connection
   if (deviceCount == 1) {
-    Serial.println("First device connected - initializing UWB stack...");
+    Serial.println("🎯 First device connected - initializing UWB stack...");
     if (!uwbInitialized) {
-      UWB.begin();
+      Serial.println("🔧 Starting UWB.begin()...");
+      UWB.begin();  // Remove boolean check as this method returns void
       uwbInitialized = true;
-      Serial.println("UWB stack initialized successfully");
+      Serial.println("✅ UWB stack initialized successfully");
+      Serial.println("🎯 UWB is now ready for ranging");
+      
+      // Force start ranging for all connected devices
+      for (int i = 0; i < deviceCount; i++) {
+        if (connectedDevices[i].isActive) {
+          connectedDevices[i].hasActiveSession = true;
+          Serial.print("✅ Device ");
+          Serial.print(connectedDevices[i].deviceId);
+          Serial.println(" marked as having active UWB session");
+        }
+      }
+    } else {
+      Serial.println("⚠️ UWB already initialized");
+    }
+  } else {
+    Serial.print("🔧 Additional device connected (total: ");
+    Serial.print(deviceCount);
+    Serial.println(")");
+    
+    // If UWB is already initialized, start session for this device
+    if (uwbInitialized) {
+      int index = findDeviceIndex(dev.address());
+      if (index != -1) {
+        connectedDevices[index].hasActiveSession = true;
+        Serial.print("✅ Device ");
+        Serial.print(connectedDevices[index].deviceId);
+        Serial.println(" added to active UWB session");
+      }
     }
   }
   
@@ -210,14 +270,10 @@ void clientDisconnected(BLEDevice dev) {
   Serial.print("Remaining connected devices: ");
   Serial.println(deviceCount);
   
-  // Deinitialize UWB stack if no devices are connected
+  // Keep UWB running even when no devices are connected
+  // This ensures we stay ready for new connections
   if(deviceCount == 0) {
-    Serial.println("No devices connected, stopping UWB...");
-    if (uwbInitialized) {
-      UWB.end();
-      uwbInitialized = false;
-      Serial.println("UWB stack stopped");
-    }
+    Serial.println("No devices connected, but keeping UWB active for new connections...");
   }
 }
 
@@ -326,7 +382,7 @@ void setup() {
     connectedDevices[i].lastActivity = 0;
   }
 
-  //register the callback for ranging data
+  //register the callback for ranging data (but don't initialize UWB yet)
   UWB.registerRangingCallback(rangingHandler);
   
   //register the callback for client connection/disconnection events
@@ -338,23 +394,38 @@ void setup() {
   UWBNearbySessionManager.onSessionStop(sessionStopped);
 
   //init the BLE services and characteristic, advertise with device name
+  Serial.println("Initializing BLE services...");
   UWBNearbySessionManager.begin("Gabriel's Pilot");
   Serial.println("BLE services initialized successfully");
   Serial.println("Advertising as 'Gabriel's Pilot'");
+  
+  // DON'T initialize UWB here - wait for first device connection
+  Serial.println("UWB initialization will happen when first device connects");
+  Serial.println("This ensures proper initialization sequence");
+  
+  // Small delay to ensure everything is properly initialized
+  delay(1000);
   
   Serial.println("Setup complete. Waiting for connections...");
 }
 
 void loop() {
-  delay(100);
+  // Reduced delay for more responsive communication
+  delay(20);  // 20ms instead of 100ms for 5x faster polling
   
-  //poll the BLE stack
+  //poll the BLE stack more frequently
   UWBNearbySessionManager.poll();
   
   // Clean up inactive devices
   cleanupInactiveDevices();
   
-  // Periodic status updates
+  // Send keepalive to maintain active connections
+  if (millis() - lastKeepalive > KEEPALIVE_INTERVAL) {
+    sendKeepalive();
+    lastKeepalive = millis();
+  }
+  
+  // Periodic status updates (less frequent than keepalive)
   if (millis() - lastHeartbeat > HEARTBEAT_INTERVAL) {
     printStatus();
     lastHeartbeat = millis();

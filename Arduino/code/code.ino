@@ -383,8 +383,11 @@ void rangingHandler(UWBRangingData &rangingData) {
  * @param dev the client BLE device
  */
 void clientConnected(BLEDevice dev) {
-  Serial.print("BLE Client connected: ");
+  Serial.println("📱 ========== CLIENT CONNECTED EVENT ==========");
+  Serial.print("📱 BLE Client connected: ");
   Serial.println(dev.address());
+  Serial.print("📱 Device count before adding: ");
+  Serial.println(deviceCount);
   
   // Add device to tracking array
   if (!addDevice(dev)) {
@@ -394,11 +397,40 @@ void clientConnected(BLEDevice dev) {
   
   // Initialize UWB stack upon first connection
   if (deviceCount == 1) {
-    Serial.println("First device connected - initializing UWB stack...");
+    Serial.println("🎯 First device connected - initializing UWB stack...");
     if (!uwbInitialized) {
+      Serial.println("🔧 Starting UWB.begin()...");
       UWB.begin();  // Remove boolean check as this method returns void
       uwbInitialized = true;
-      Serial.println("UWB stack initialized");
+      Serial.println("✅ UWB stack initialized successfully");
+      Serial.println("🎯 UWB is now ready for ranging");
+      
+      // Force start ranging for all connected devices
+      for (int i = 0; i < deviceCount; i++) {
+        if (connectedDevices[i].isActive) {
+          connectedDevices[i].hasActiveSession = true;
+          Serial.print("✅ Device ");
+          Serial.print(connectedDevices[i].deviceId);
+          Serial.println(" marked as having active UWB session");
+        }
+      }
+    } else {
+      Serial.println("⚠️ UWB already initialized");
+    }
+  } else {
+    Serial.print("🔧 Additional device connected (total: ");
+    Serial.print(deviceCount);
+    Serial.println(")");
+    
+    // If UWB is already initialized, start session for this device
+    if (uwbInitialized) {
+      int index = findDeviceIndex(dev.address());
+      if (index != -1) {
+        connectedDevices[index].hasActiveSession = true;
+        Serial.print("✅ Device ");
+        Serial.print(connectedDevices[index].deviceId);
+        Serial.println(" added to active UWB session");
+      }
     }
   }
   
@@ -486,9 +518,7 @@ void sessionStopped(BLEDevice dev) {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) {
-    ; // Wait for serial port to connect
-  }
+
   
   Serial.println("=== Proxi Arduino UWB Device (Multi-Device Enhanced) ===");
   Serial.println("Initializing...");

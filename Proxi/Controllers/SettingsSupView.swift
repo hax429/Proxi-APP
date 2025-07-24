@@ -213,6 +213,357 @@ struct AboutView: View {
     }
 }
 
+struct DirectionOverrideView: View {
+    @State private var selectedAngle: Double = UserDefaults.standard.double(forKey: "forcedDirectionAngle")
+    @State private var isDirectionOverrideEnabled: Bool = UserDefaults.standard.bool(forKey: "isDirectionOverrideEnabled")
+    @State private var angleText: String = ""
+    @Environment(\.presentationMode) var presentationMode
+    
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Text("Direction Override")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Button("Done") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(.blue)
+                }
+                .padding()
+                
+                ScrollView {
+                    VStack(spacing: 32) {
+                        // Enable/Disable Toggle
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Override Direction")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            Toggle("Enable Direction Override", isOn: $isDirectionOverrideEnabled)
+                                .toggleStyle(SwitchToggleStyle(tint: .blue))
+                                .onChange(of: isDirectionOverrideEnabled) { value in
+                                    UserDefaults.standard.set(value, forKey: "isDirectionOverrideEnabled")
+                                }
+                        }
+                        .padding()
+                        .background(Color(hex: "232229"))
+                        .cornerRadius(12)
+                        
+                        if isDirectionOverrideEnabled {
+                            // Compass Interface
+                            VStack(spacing: 24) {
+                                Text("Set Direction")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                
+                                // Compass Circle
+                                ZStack {
+                                    // Outer circle
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                                        .frame(width: 250, height: 250)
+                                    
+                                    // Degree markings
+                                    ForEach(0..<12) { i in
+                                        Rectangle()
+                                            .fill(Color.white.opacity(0.6))
+                                            .frame(width: 2, height: 15)
+                                            .offset(y: -117.5)
+                                            .rotationEffect(.degrees(Double(i) * 30))
+                                    }
+                                    
+                                    // Cardinal directions
+                                    VStack {
+                                        Text("N")
+                                            .foregroundColor(.white)
+                                            .font(.headline)
+                                            .offset(y: -100)
+                                        Spacer()
+                                        Text("S")
+                                            .foregroundColor(.white)
+                                            .font(.headline)
+                                            .offset(y: 100)
+                                    }
+                                    .frame(height: 250)
+                                    
+                                    HStack {
+                                        Text("W")
+                                            .foregroundColor(.white)
+                                            .font(.headline)
+                                            .offset(x: -100)
+                                        Spacer()
+                                        Text("E")
+                                            .foregroundColor(.white)
+                                            .font(.headline)
+                                            .offset(x: 100)
+                                    }
+                                    .frame(width: 250)
+                                    
+                                    // Direction Arrow
+                                    Image(systemName: "location.north.fill")
+                                        .font(.system(size: 30))
+                                        .foregroundColor(.red)
+                                        .offset(y: -90)
+                                        .rotationEffect(.degrees(selectedAngle))
+                                        .animation(.easeInOut(duration: 0.3), value: selectedAngle)
+                                    
+                                    // Center dot
+                                    Circle()
+                                        .fill(Color.white)
+                                        .frame(width: 8, height: 8)
+                                }
+                                .gesture(
+                                    DragGesture()
+                                        .onChanged { value in
+                                            let center = CGPoint(x: 125, y: 125)
+                                            let angle = atan2(value.location.y - center.y, value.location.x - center.x)
+                                            let degrees = angle * 180 / .pi + 90
+                                            selectedAngle = degrees < 0 ? degrees + 360 : degrees
+                                            angleText = String(format: "%.0f", selectedAngle)
+                                            UserDefaults.standard.set(selectedAngle, forKey: "forcedDirectionAngle")
+                                        }
+                                )
+                                
+                                // Angle Display and Input
+                                VStack(spacing: 16) {
+                                    Text("\(String(format: "%.0f", selectedAngle))°")
+                                        .font(.title)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.blue)
+                                    
+                                    HStack {
+                                        Text("Manual Input:")
+                                            .foregroundColor(.white)
+                                        
+                                        TextField("0-359", text: $angleText)
+                                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                                            .keyboardType(.numberPad)
+                                            .frame(width: 80)
+                                            .onSubmit {
+                                                if let angle = Double(angleText), angle >= 0, angle <= 359 {
+                                                    selectedAngle = angle
+                                                    UserDefaults.standard.set(selectedAngle, forKey: "forcedDirectionAngle")
+                                                }
+                                            }
+                                        
+                                        Button("Set") {
+                                            if let angle = Double(angleText), angle >= 0, angle <= 359 {
+                                                selectedAngle = angle
+                                                UserDefaults.standard.set(selectedAngle, forKey: "forcedDirectionAngle")
+                                            }
+                                        }
+                                        .foregroundColor(.blue)
+                                    }
+                                }
+                            }
+                            .padding()
+                            .background(Color(hex: "232229"))
+                            .cornerRadius(12)
+                        }
+                        
+                        Spacer()
+                    }
+                    .padding()
+                }
+            }
+        }
+        .onAppear {
+            angleText = String(format: "%.0f", selectedAngle)
+        }
+    }
+}
+
+struct CalibrationView: View {
+    @State private var calibrationOffset: String = {
+        let offset = UserDefaults.standard.double(forKey: "distanceCalibrationOffset")
+        return String(format: "%.0f", offset)
+    }()
+    @Environment(\.presentationMode) var presentationMode
+    
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Text("Distance Calibration")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Button("Done") {
+                        // Save the calibration offset
+                        if let offset = Double(calibrationOffset) {
+                            UserDefaults.standard.set(offset, forKey: "distanceCalibrationOffset")
+                        }
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(.blue)
+                }
+                .padding()
+                
+                ScrollView {
+                    VStack(spacing: 32) {
+                        // Explanation Section
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Calibration Adjustment")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            Text("Adjust the distance reading by a fixed number of centimeters. Positive values increase the displayed distance, negative values decrease it.")
+                                .font(.body)
+                                .foregroundColor(.white.opacity(0.7))
+                                .multilineTextAlignment(.leading)
+                        }
+                        .padding()
+                        .background(Color(hex: "232229"))
+                        .cornerRadius(12)
+                        
+                        // Calibration Input Section
+                        VStack(spacing: 24) {
+                            Text("Adjustment Value")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            VStack(spacing: 16) {
+                                Text("Enter centimeters to add/subtract:")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white.opacity(0.8))
+                                
+                                HStack(spacing: 16) {
+                                    TextField("0", text: $calibrationOffset)
+                                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                                        .keyboardType(.numbersAndPunctuation)
+                                        .frame(width: 120)
+                                        .multilineTextAlignment(.center)
+                                        .font(.title2)
+                                    
+                                    Text("cm")
+                                        .font(.title2)
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                                
+                                VStack(spacing: 8) {
+                                    Text("Current Adjustment:")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.6))
+                                    
+                                    if let offset = Double(calibrationOffset) {
+                                        Text("\(offset > 0 ? "+" : "")\(String(format: "%.0f", offset)) cm")
+                                            .font(.headline)
+                                            .foregroundColor(offset > 0 ? .green : offset < 0 ? .orange : .white)
+                                    } else {
+                                        Text("Invalid input")
+                                            .font(.headline)
+                                            .foregroundColor(.red)
+                                    }
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color(hex: "232229"))
+                        .cornerRadius(12)
+                        
+                        // Quick Adjustment Buttons
+                        VStack(spacing: 16) {
+                            Text("Quick Adjustments")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
+                                ForEach([-10, -5, -1, 0, 1, 5, 10], id: \.self) { value in
+                                    Button(action: {
+                                        calibrationOffset = String(value)
+                                    }) {
+                                        Text("\(value > 0 ? "+" : "")\(value) cm")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 8)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .fill(value == 0 ? Color.gray.opacity(0.3) : Color.blue.opacity(0.6))
+                                            )
+                                    }
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color(hex: "232229"))
+                        .cornerRadius(12)
+                        
+                        // Example Section
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Examples")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("•")
+                                        .foregroundColor(.blue)
+                                    Text("Actual: 100cm, Adjustment: +5cm → Display: 105cm")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                                
+                                HStack {
+                                    Text("•")
+                                        .foregroundColor(.orange)
+                                    Text("Actual: 50cm, Adjustment: -10cm → Display: 40cm")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                                
+                                HStack {
+                                    Text("•")
+                                        .foregroundColor(.red)
+                                    Text("If result < 0cm → Display: 0cm")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color(hex: "232229"))
+                        .cornerRadius(12)
+                        
+                        Spacer()
+                    }
+                    .padding()
+                }
+            }
+        }
+    }
+}
+
 //MARK: Profile selection
 
 

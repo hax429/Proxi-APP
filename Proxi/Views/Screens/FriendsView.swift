@@ -46,7 +46,9 @@ struct FriendsView: View {
                 return nil
             }
         } else {
-            return Array(bleManager.connectedPeripherals.values)
+            return Array(bleManager.connectedPeripherals.values).filter { peripheral in
+                peripheral.name != "Adafruit Bluefruit LE AA68"
+            }
         }
     }
     
@@ -56,7 +58,8 @@ struct FriendsView: View {
             return []
         } else {
             return bleManager.discoveredPeripherals.filter { peripheral in
-                !bleManager.connectedPeripherals.keys.contains(peripheral.identifier)
+                !bleManager.connectedPeripherals.keys.contains(peripheral.identifier) &&
+                peripheral.name != "Adafruit Bluefruit LE AA68"
             }
         }
     }
@@ -230,7 +233,10 @@ struct FriendsView: View {
                             bleManager: bleManager,
                             isConnected: true,
                             pendingRequests: pendingRequests,
-                            onAction: { bleManager.disconnect(peripheralID: peripheral.identifier) }
+                            onAction: { 
+                                // Disconnect only this specific device
+                                bleManager.disconnect(peripheralID: peripheral.identifier) 
+                            }
                         )
                     }
                 }
@@ -414,8 +420,11 @@ struct FriendsView: View {
         )
         pendingRequests.append(pendingRequest)
         
-        // Simulate approval after 3 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+        // Connect immediately without disconnecting existing devices
+        self.bleManager.connect(to: peripheral)
+        
+        // Simulate approval after 2 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             // Remove from pending
             self.pendingRequests.removeAll { $0.id == pendingRequest.id }
             
@@ -427,9 +436,6 @@ struct FriendsView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 self.showApprovalPopup = false
             }
-            
-            // Actually connect to the device
-            self.bleManager.connect(to: peripheral)
         }
     }
     

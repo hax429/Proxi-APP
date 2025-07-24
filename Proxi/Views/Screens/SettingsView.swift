@@ -82,7 +82,6 @@ struct SettingsView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var bleManager: BLEManager
     @EnvironmentObject var userManager: UserManager
-    @StateObject var simulationManager = SimulationManager()
     @State var showingDebugLog = false
     @State var showingProfile = false
     @State var showingNotifications = false
@@ -96,10 +95,13 @@ struct SettingsView: View {
     
     // Developer options state
     @State var versionClickCount: Int = 0
-//    @State private var isDeveloperModeEnabled: Bool = UserDefaults.standard.bool(forKey: "isDeveloperModeEnabled")
-    @State var isDeveloperModeEnabled: Bool = false
+    @State var isDeveloperModeEnabled: Bool = UserDefaults.standard.bool(forKey: "isDeveloperModeEnabled")
     @State var showingDeveloperModeAlert = false
     @State var forcedElevationValue: String = UserDefaults.standard.string(forKey: "forcedElevationValue") ?? "DISABLED"
+    @State var forcedDistanceValue: String = UserDefaults.standard.string(forKey: "forcedDistanceValue") ?? ""
+    @State var isDistanceOverrideEnabled: Bool = UserDefaults.standard.bool(forKey: "isDistanceOverrideEnabled")
+    @State var showingDirectionOverride = false
+    @State var showingCalibration = false
     
     // Scanning state
     @State var discoveredDevicesCount = 0
@@ -164,6 +166,12 @@ struct SettingsView: View {
             } else {
                 MailUnavailableView()
             }
+        }
+        .sheet(isPresented: $showingDirectionOverride) {
+            DirectionOverrideView()
+        }
+        .sheet(isPresented: $showingCalibration) {
+            CalibrationView()
         }
         .alert("Developer Mode Enabled", isPresented: $showingDeveloperModeAlert) {
             Button("OK") { }
@@ -441,49 +449,6 @@ extension SettingsView {
                 // Discovered Devices List - Only show when no devices are connected
                 if discoveredDevicesCount > 0 && connectedDevicesCount == 0 {
                     VStack(alignment: .leading, spacing: 8) {
-                        // Hardcoded Devices Section for Prototype (Developer Mode Only)
-                        if isDeveloperModeEnabled {
-                            Text("Hardcoded Devices (Prototype)")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.orange)
-                            
-                            ForEach(bleManager.getHardcodedDevices(), id: \.uuid) { device in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(device.name)
-                                        .font(.subheadline)
-                                        .foregroundColor(.white)
-                                    
-                                    Text("UUID: \(device.uuid.uuidString.prefix(8))...")
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                }
-                                
-                                Spacer()
-                                
-                                Button("Connect") {
-                                    logger.info("Connecting to hardcoded device: \(device.name)")
-                                    bleManager.connectToHardcodedDevice(uuid: device.uuid)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.blue.opacity(0.3))
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            
-                            Button("Load Hardcoded Devices") {
-                                bleManager.loadHardcodedDevices()
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(Color.orange.opacity(0.3))
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
-                        }
                         
                         Text("Discovered Devices")
                             .font(.subheadline)
@@ -582,70 +547,6 @@ extension SettingsView {
             }
             
             VStack(spacing: 12) {
-                // Fake Device Simulation Button
-                Button(action: {
-                    if simulationManager.isSimulationEnabled {
-                        simulationManager.stopSimulation()
-                    } else {
-                        simulationManager.startSimulation()
-                    }
-                }) {
-                    HStack {
-                        Image(systemName: simulationManager.isSimulationEnabled ? "stop.circle.fill" : "play.circle.fill")
-                            .foregroundColor(simulationManager.isSimulationEnabled ? .red : .green)
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(simulationManager.isSimulationEnabled ? "Stop Fake Devices" : "Start Fake Devices")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(.white)
-                            
-                            Text(simulationManager.isSimulationEnabled ? "Simulation active with random data" : "Simulate 3 fake UWB devices")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                        
-                        Spacer()
-                        
-                        if simulationManager.isSimulationEnabled {
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 8, height: 8)
-                        }
-                    }
-                    .padding()
-                    .background(Color(hex: "232229"))
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(simulationManager.isSimulationEnabled ? Color.green.opacity(0.5) : Color.clear, lineWidth: 1)
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                if simulationManager.isSimulationEnabled {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Simulation Status")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.green)
-                        
-                        Text("• 3 fake devices with random distance/direction data")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.7))
-                        
-                        Text("• Data updates every 0.5 seconds")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.7))
-                        
-                        Text("• Compatible with Friends and UWB views")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    .padding()
-                    .background(Color.green.opacity(0.1))
-                    .cornerRadius(8)
-                }
                 
                 // Elevation Force Picker
                 VStack(alignment: .leading, spacing: 12) {
@@ -675,6 +576,71 @@ extension SettingsView {
                 .background(Color(hex: "232229"))
                 .cornerRadius(12)
                 
+                // Force Distance Override
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Force Distance Override")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                        
+                        Text("Override distance display with custom value")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    
+                    HStack(spacing: 12) {
+                        Toggle("Enable Override", isOn: $isDistanceOverrideEnabled)
+                            .toggleStyle(SwitchToggleStyle(tint: .blue))
+                            .onChange(of: isDistanceOverrideEnabled) { value in
+                                UserDefaults.standard.set(value, forKey: "isDistanceOverrideEnabled")
+                            }
+                        
+                        if isDistanceOverrideEnabled {
+                            TextField("Distance (e.g., 23)", text: $forcedDistanceValue)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .keyboardType(.decimalPad)
+                                .frame(width: 120)
+                                .onChange(of: forcedDistanceValue) { value in
+                                    UserDefaults.standard.set(value, forKey: "forcedDistanceValue")
+                                }
+                        }
+                    }
+                }
+                .padding()
+                .background(Color(hex: "232229"))
+                .cornerRadius(12)
+                
+                // Direction Override Control
+                Button(action: { showingDirectionOverride = true }) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Force Direction Override")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                            
+                            Text("Override compass direction with custom angle")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        
+                        HStack {
+                            Image(systemName: "location.north.circle")
+                                .foregroundColor(.blue)
+                            Text("Configure Direction")
+                                .foregroundColor(.white)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                    }
+                    .padding()
+                    .background(Color(hex: "232229"))
+                    .cornerRadius(12)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
                 // UWB Debug Window Toggle
                 Button(action: {
                     NotificationCenter.default.post(name: NSNotification.Name("ShowUWBDebugWindow"), object: nil)
@@ -690,6 +656,34 @@ extension SettingsView {
                                 .foregroundColor(.white)
                             
                             Text("Display real-time UWB tracking data")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    .padding()
+                    .background(Color(hex: "232229"))
+                    .cornerRadius(12)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                // Distance Calibration
+                Button(action: { showingCalibration = true }) {
+                    HStack {
+                        Image(systemName: "ruler.fill")
+                            .foregroundColor(.blue)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Distance Calibration")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                            
+                            Text("Adjust distance readings by fixed amount")
                                 .font(.caption)
                                 .foregroundColor(.white.opacity(0.7))
                         }

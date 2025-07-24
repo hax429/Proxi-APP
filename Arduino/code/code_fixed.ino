@@ -1,4 +1,4 @@
-#include <ArduinoBLE.h>
+ax#include <ArduinoBLE.h>
 #include <StellaUWB.h>
 
 // Enhanced multi-device support
@@ -7,6 +7,19 @@
 #define CONNECTION_TIMEOUT 10000  // 10 seconds for quicker timeout detection
 #define KEEPALIVE_INTERVAL 2000   // 2 seconds keepalive ping
 #define ADVERTISE_CHECK_INTERVAL 1000  // Check advertising every second
+
+// BLE Message Protocol (Qorvo Standard)
+enum BLEMessageId {
+    // Messages from accessory (Arduino to iOS)
+    ACCESSORY_CONFIG_DATA = 0x1,    // Device configuration data
+    ACCESSORY_UWB_DID_START = 0x2,  // UWB ranging started
+    ACCESSORY_UWB_DID_STOP = 0x3,   // UWB ranging stopped
+    
+    // Messages to accessory (iOS to Arduino)
+    INITIALIZE = 0xA,               // Initialize UWB stack
+    CONFIGURE_AND_START = 0xB,      // Configure and start ranging
+    STOP = 0xC                      // Stop ranging
+};
 
 // Device tracking structure
 struct ConnectedDevice {
@@ -33,6 +46,161 @@ uint8_t nextDeviceId = 1;
 bool isAdvertising = false;
 bool shouldBeAdvertising = true;
 
+// BLE Service and characteristics for explicit message handling
+BLEService uwbService("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
+BLECharacteristic rxCharacteristic("6E400002-B5A3-F393-E0A9-E50E24DCCA9E", BLEWrite, 20);
+BLECharacteristic txCharacteristic("6E400003-B5A3-F393-E0A9-E50E24DCCA9E", BLERead | BLENotify, 20);
+
+/**
+ * @brief Send BLE message to iOS
+ */
+void sendBLEMessage(uint8_t messageId, uint8_t* data = nullptr, size_t length = 0) {
+  uint8_t message[20];
+  message[0] = messageId;
+  
+  if (data && length > 0 && length < 19) {
+    memcpy(&message[1], data, length);
+    length += 1;
+  } else {
+    length = 1;
+  }
+  
+  Serial.print("📤 Sending BLE message: 0x");
+  Serial.print(messageId, HEX);
+  Serial.print(" (");
+  Serial.print(length);
+  Serial.println(" bytes)");
+  
+  txCharacteristic.writeValue(message, length);
+}
+
+/**
+ * @brief Handle incoming BLE messages from iOS
+ */
+void handleBLEMessage(uint8_t messageId, uint8_t* data, size_t length) {
+  Serial.print("📥 Received BLE message: 0x");
+  Serial.print(messageId, HEX);
+  Serial.print(" (");
+  Serial.print(length);
+  Serial.println(" bytes)");
+  
+  switch(messageId) {
+    case INITIALIZE:
+      Serial.println("🎯 INITIALIZE command received from iOS");
+      handleInitialize();
+      break;
+      
+    case CONFIGURE_AND_START:
+      Serial.println("🚀 CONFIGURE_AND_START command received from iOS");
+      handleConfigureAndStart(data, length);
+      break;
+      
+    case STOP:
+      Serial.println("⏹️ STOP command received from iOS");
+      handleStop();
+      break;
+      
+    default:
+      Serial.print("❓ Unknown message ID: 0x");
+      Serial.println(messageId, HEX);
+      break;
+  }
+}
+
+/**
+ * @brief Handle INITIALIZE command from iOS
+ */
+void handleInitialize() {
+  Serial.println("🔧 Handling INITIALIZE command...");
+  
+  // Initialize UWB if not already done
+  if (!uwbInitialized) {
+    Serial.println("🎯 Initializing UWB stack...");
+    UWB.begin();
+    uwbInitialized = true;
+    Serial.println("✅ UWB stack initialized");
+  }
+  
+  // Send configuration data back to iOS
+  // This should contain the discovery token that iOS needs
+  Serial.println("📤 Sending ACCESSORY_CONFIG_DATA to iOS...");
+  
+  // For now, send a simple response - in real implementation,
+  // this should contain the actual UWB discovery token
+  uint8_t configData[] = {0x01, 0x02, 0x03, 0x04}; // Placeholder
+  sendBLEMessage(ACCESSORY_CONFIG_DATA, configData, sizeof(configData));
+  
+  Serial.println("✅ INITIALIZE handling complete");
+}
+
+/**
+ * @brief Handle CONFIGURE_AND_START command from iOS
+ */
+void handleConfigureAndStart(uint8_t* data, size_t length) {
+  Serial.println("🚀 Handling CONFIGURE_AND_START command...");
+  Serial.print("   Configuration data length: ");
+  Serial.println(length);
+  
+  // This data contains the iOS NISession configuration
+  // In a real implementation, this would be used to configure the UWB session
+  
+  // For now, simulate starting the UWB session
+  Serial.println("🎯 Starting UWB ranging session...");
+  
+  // Mark devices as having active sessions
+  for (int i = 0; i < deviceCount; i++) {
+    if (connectedDevices[i].isActive) {
+      connectedDevices[i].hasActiveSession = true;
+      Serial.print("✅ Device ");
+      Serial.print(connectedDevices[i].deviceId);
+      Serial.println(" now has active UWB session");
+    }
+  }
+  
+  // Send confirmation that UWB started
+  sendBLEMessage(ACCESSORY_UWB_DID_START);
+  
+  Serial.println("✅ CONFIGURE_AND_START handling complete");
+  Serial.println("🎯 UWB ranging is now ACTIVE");
+}
+
+/**
+ * @brief Handle STOP command from iOS
+ */
+void handleStop() {
+  Serial.println("⏹️ Handling STOP command...");
+  
+  // Stop UWB sessions for all devices
+  for (int i = 0; i < deviceCount; i++) {
+    if (connectedDevices[i].hasActiveSession) {
+      connectedDevices[i].hasActiveSession = false;
+      Serial.print("⏹️ Device ");
+      Serial.print(connectedDevices[i].deviceId);
+      Serial.println(" UWB session stopped");
+    }
+  }
+  
+  // Send confirmation that UWB stopped
+  sendBLEMessage(ACCESSORY_UWB_DID_STOP);
+  
+  Serial.println("✅ STOP handling complete");
+}
+
+/**
+ * @brief BLE characteristic write callback
+ */
+void onBLEWritten(BLEDevice central, BLECharacteristic characteristic) {
+  if (characteristic == rxCharacteristic) {
+    uint8_t data[20];
+    int length = characteristic.readValue(data, sizeof(data));
+    
+    if (length > 0) {
+      uint8_t messageId = data[0];
+      handleBLEMessage(messageId, &data[1], length - 1);
+    }
+  }
+}
+
 /**
  * @brief Generate and display device UUID for hardcoding
  * This function creates a consistent UUID based on the device's BLE address
@@ -53,9 +221,9 @@ void displayDeviceUUID() {
   cleanAddress.replace(":", "");
   cleanAddress.toUpperCase();
   
-  // Create UUID based on the hardcoded device list in BLEManager.swift
-  // Expected UUID for "Arduino UWB": ABCDEF12-3456-7890-ABCD-EF1234567890
-  String deviceUUID = "ABCDEF12-3456-7890-ABCD-EF1234567890";
+  // Create UUID based on the actual BLE address for this device (79:7f:c7:ec:5d:4a)
+  // Expected address: 797FC7EC5D4A
+  String deviceUUID = "797FC7EC-5D4A-4797-A7FC-797FC7EC5D4A";
   
   Serial.print("║ Generated UUID: ");
   Serial.print(deviceUUID);
@@ -67,7 +235,7 @@ void displayDeviceUUID() {
   Serial.println("                      ║");
   Serial.println("║                                                            ║");
   Serial.println("║ Add this to BLEManager.swift hardcodedDevices array:      ║");
-  Serial.println("║ HardcodedDevice(name: \"Arduino UWB\",                      ║");
+  Serial.println("║ HardcodedDevice(name: \"Proxi Pilot\",                      ║");
   Serial.print("║                 uuid: UUID(uuidString: \"");
   Serial.print(deviceUUID);
   Serial.println("\")!, ║");
@@ -257,7 +425,7 @@ void ensureBLEAdvertising() {
         Serial.println(" more devices");
         Serial.println("📡 Advertising Details:");
         Serial.print("   - Device Name: ");
-        Serial.println("Arduino UWB");
+        Serial.println("Proxi Pilot");
         Serial.print("   - BLE Address: ");
         Serial.println(BLE.address());
         Serial.println("   - Services: UWB Transfer & Qorvo Services");
@@ -383,55 +551,13 @@ void rangingHandler(UWBRangingData &rangingData) {
  * @param dev the client BLE device
  */
 void clientConnected(BLEDevice dev) {
-  Serial.println("📱 ========== CLIENT CONNECTED EVENT ==========");
-  Serial.print("📱 BLE Client connected: ");
+  Serial.print("BLE Client connected: ");
   Serial.println(dev.address());
-  Serial.print("📱 Device count before adding: ");
-  Serial.println(deviceCount);
   
   // Add device to tracking array
   if (!addDevice(dev)) {
     Serial.println("ERROR: Failed to add device - maximum connections reached");
     return;
-  }
-  
-  // Initialize UWB stack upon first connection
-  if (deviceCount == 1) {
-    Serial.println("🎯 First device connected - initializing UWB stack...");
-    if (!uwbInitialized) {
-      Serial.println("🔧 Starting UWB.begin()...");
-      UWB.begin();  // Remove boolean check as this method returns void
-      uwbInitialized = true;
-      Serial.println("✅ UWB stack initialized successfully");
-      Serial.println("🎯 UWB is now ready for ranging");
-      
-      // Force start ranging for all connected devices
-      for (int i = 0; i < deviceCount; i++) {
-        if (connectedDevices[i].isActive) {
-          connectedDevices[i].hasActiveSession = true;
-          Serial.print("✅ Device ");
-          Serial.print(connectedDevices[i].deviceId);
-          Serial.println(" marked as having active UWB session");
-        }
-      }
-    } else {
-      Serial.println("⚠️ UWB already initialized");
-    }
-  } else {
-    Serial.print("🔧 Additional device connected (total: ");
-    Serial.print(deviceCount);
-    Serial.println(")");
-    
-    // If UWB is already initialized, start session for this device
-    if (uwbInitialized) {
-      int index = findDeviceIndex(dev.address());
-      if (index != -1) {
-        connectedDevices[index].hasActiveSession = true;
-        Serial.print("✅ Device ");
-        Serial.print(connectedDevices[index].deviceId);
-        Serial.println(" added to active UWB session");
-      }
-    }
   }
   
   Serial.print("Total connected devices: ");
@@ -518,11 +644,11 @@ void sessionStopped(BLEDevice dev) {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) {
-    ; // Wait for serial port to connect
-  }
+  // while (!Serial) {
+  //   ; // Wait for serial port to connect
+  // }
   
-  Serial.println("=== Arduino UWB Device (Multi-Device Enhanced) ===");
+  Serial.println("=== Proxi Arduino UWB Device (Enhanced Protocol Support) ===");
   Serial.println("Initializing...");
 
 #if defined(ARDUINO_PORTENTA_C33)
@@ -543,7 +669,7 @@ void setup() {
     connectedDevices[i].lastActivity = 0;
   }
 
-  //register the callback for ranging data (but don't initialize UWB yet)
+  //register the callback for ranging data
   UWB.registerRangingCallback(rangingHandler);
   
   //register the callback for client connection/disconnection events
@@ -563,19 +689,29 @@ void setup() {
   }
   
   // Set device name BEFORE UWB initialization
-  BLE.setLocalName("Arduino UWB");
-  BLE.setDeviceName("Arduino UWB");
-  Serial.println("✅ BLE device name set to 'Arduino UWB'");
+  BLE.setLocalName("Proxi Pilot");
+  BLE.setDeviceName("Proxi Pilot");
+  Serial.println("✅ BLE device name set to 'Proxi Pilot'");
+  
+  // CRITICAL: Setup explicit BLE service and characteristics
+  Serial.println("🔧 Setting up explicit BLE protocol service...");
+  
+  // Add the UWB service
+  BLE.setAdvertisedService(uwbService);
+  uwbService.addCharacteristic(rxCharacteristic);
+  uwbService.addCharacteristic(txCharacteristic);
+  BLE.addService(uwbService);
+  
+  // Set up write callback for explicit message handling
+  rxCharacteristic.setEventHandler(BLEWritten, onBLEWritten);
+  
+  Serial.println("✅ Explicit BLE protocol service configured");
   
   //init the BLE services and characteristic, advertise with device name
   Serial.println("🚀 Initializing UWBNearbySessionManager...");
-  UWBNearbySessionManager.begin("Arduino UWB");  // Name matches hardcoded device list
+  UWBNearbySessionManager.begin("Proxi Pilot");  // Name ending with "Pilot" for filtering
   Serial.println("BLE services initialized");
-  Serial.println("Advertising as 'Arduino UWB'");
-  
-  // DON'T initialize UWB here - wait for first device connection
-  Serial.println("UWB initialization will happen when first device connects");
-  Serial.println("This ensures proper initialization sequence");
+  Serial.println("Advertising as 'Proxi Pilot'");
   
   // CRITICAL: Add delay and verification
   delay(1000);  // Give BLE stack time to initialize
@@ -604,7 +740,7 @@ void setup() {
   Serial.print("  - MAC Address: ");
   Serial.println(BLE.address());
   Serial.print("  - Device Name: ");
-  Serial.println("Arduino UWB");
+  Serial.println("Proxi Pilot");
   
   // CRITICAL: Display formatted UUID for easy hardcoding
   Serial.println();
@@ -613,10 +749,10 @@ void setup() {
   
   // ALSO: Show the exact UUID being used in iOS hardcoded list
   Serial.println("🎯 EXACT UUID MATCH:");
-  Serial.println("iOS Hardcoded UUID: ABCDEF12-3456-7890-ABCD-EF1234567890");
+  Serial.println("iOS Hardcoded UUID: 797FC7EC-5D4A-4797-A7FC-797FC7EC5D4A");
   Serial.print("Arduino BLE Address: ");
   Serial.println(BLE.address());
-  Serial.println("✅ This device uses the third hardcoded UUID slot");
+  Serial.println("✅ These should match for successful connection");
   Serial.println();
   
   // CRITICAL: Force BLE advertising to start manually if UWBNearbySessionManager didn't handle it
@@ -642,13 +778,17 @@ void setup() {
   Serial.println("🎯 FINAL ADVERTISING VERIFICATION:");
   Serial.print("  - Advertising Active: ");
   Serial.println(isAdvertising ? "YES" : "NO");
-  Serial.print("  - Device Name: Arduino UWB");
+  Serial.print("  - Device Name: Proxi Pilot");
   Serial.print("  - BLE Address: ");
   Serial.println(BLE.address());
   Serial.println("📡 Arduino should now be discoverable by iPhone!");
   
   Serial.println("Setup complete. Waiting for multiple connections...");
   Serial.println("📡 Device is now discoverable by multiple phones simultaneously");
+  Serial.println("🔧 EXPLICIT BLE MESSAGE PROTOCOL ENABLED");
+  Serial.println("   - Will respond to INITIALIZE (0x0A) commands");
+  Serial.println("   - Will respond to CONFIGURE_AND_START (0x0B) commands");
+  Serial.println("   - Will respond to STOP (0x0C) commands");
 }
 
 void loop() {
@@ -657,6 +797,9 @@ void loop() {
   
   //poll the BLE stack more frequently
   UWBNearbySessionManager.poll();
+  
+  // Also poll the explicit BLE service
+  BLE.poll();
   
   // Clean up inactive devices
   cleanupInactiveDevices();

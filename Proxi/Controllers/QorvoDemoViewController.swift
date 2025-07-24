@@ -493,11 +493,11 @@ func getElevationFromInt(elevation: Int?) -> String {
         case NINearbyObject.VerticalDirectionEstimate.below.rawValue:
             return "below".localizedUppercase
         case NINearbyObject.VerticalDirectionEstimate.same.rawValue:
-            return "above".localizedUppercase
+            return "same level".localizedUppercase
         case NINearbyObject.VerticalDirectionEstimate.aboveOrBelow.rawValue, NINearbyObject.VerticalDirectionEstimate.unknown.rawValue:
-            return "above".localizedUppercase
+            return "same level".localizedUppercase
         default:
-            return "above".localizedUppercase
+            return "same level".localizedUppercase
         }
     }
 }

@@ -90,13 +90,13 @@ struct QorvoView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var bleManager: BLEManager
     @EnvironmentObject var friendsManager: FriendsManager
-    @StateObject var simulationManager = SimulationManager()
     @Binding var isSidebarOpen: Bool
     @Binding var showDebugWindow: Bool
     
     // MARK: - Device Management State
     @State private var selectedDeviceIndex: Int = 0
     @State private var connectedDevicesList: [CBPeripheral] = []
+    @State private var isConnecting: Bool = false
     
     // MARK: - Direction and Location Tracking
     @State private var rotationAngle: Double = 0          // Compass rotation angle
@@ -135,11 +135,14 @@ struct QorvoView: View {
                     NoDeviceConnectedView(selectedTab: $selectedTab)
                 }
                 
-                // Multiple device selector for multi-device scenarios
-                if connectedDevices.count > 1 {
-                    CompactDeviceSelectorView(
-                        devices: connectedDevices,
-                        selectedIndex: $selectedDeviceIndex
+                // Available device selector - shows all discovered devices
+                if availableDevices.count > 0 {
+                    AvailableDeviceSelectorView(
+                        devices: availableDevices,
+                        selectedIndex: $selectedDeviceIndex,
+                        connectedDevices: connectedDevices,
+                        isConnecting: isConnecting,
+                        onDeviceSelection: handleDeviceSelection
                     )
                     .padding(.bottom, 20)
                 }
@@ -177,23 +180,20 @@ struct QorvoView: View {
     // MARK: - Computed Properties
     
     /**
-     * Connected devices from BLE manager or simulation
+     * Connected devices from BLE manager
      * Returns array of currently connected CBPeripheral objects
      */
     private var connectedDevices: [CBPeripheral] {
-        if simulationManager.isSimulationEnabled {
-            // Return simulation devices as connected peripherals
-            return simulationManager.getDeviceIds().compactMap { deviceId in
-                if let fakeDevice = simulationManager.getDeviceData(for: deviceId) {
-                    let mockPeripheral = simulationManager.createMockPeripheral(name: fakeDevice.name, id: deviceId)
-                    // For simulation, we'll return nil since we can't create CBPeripheral instances
-                    // The UI will handle this case appropriately
-                    return nil
-                }
-                return nil
-            }
-        } else {
-            return Array(bleManager.connectedPeripherals.values)
+        return Array(bleManager.connectedPeripherals.values)
+    }
+    
+    /**
+     * Available devices from BLE manager discovery
+     * Returns array of discovered CBPeripheral objects for display selection
+     */
+    private var availableDevices: [CBPeripheral] {
+        return bleManager.discoveredPeripherals.filter { peripheral in
+            peripheral.name != "Adafruit Bluefruit LE AA68"
         }
     }
     
@@ -201,38 +201,17 @@ struct QorvoView: View {
     
     /**
      * Currently selected device for UWB display
-     * Returns the device at the selected index, or nil if no devices connected
+     * Returns the device at the selected index, or nil if no devices available
      */
     private var currentDevice: CBPeripheral? {
-        guard !connectedDevices.isEmpty else { return nil }
-        let safeIndex = min(selectedDeviceIndex, connectedDevices.count - 1)
-        return connectedDevices[safeIndex]
+        guard !availableDevices.isEmpty else { return nil }
+        let safeIndex = min(selectedDeviceIndex, availableDevices.count - 1)
+        return availableDevices[safeIndex]
     }
     
     private var currentDeviceData: BLEManager.DeviceData? {
         guard let currentDevice = currentDevice else { return nil }
-        
-        if simulationManager.isSimulationEnabled {
-            // Return simulation data
-            if let fakeDevice = simulationManager.getDeviceData(for: currentDevice.identifier) {
-                // Create a mock DeviceData from simulation data
-                var deviceData = BLEManager.DeviceData(peripheral: currentDevice)
-                deviceData.isRanging = fakeDevice.isRanging
-                deviceData.uwbLocation.distance = fakeDevice.distance
-                deviceData.uwbLocation.direction = fakeDevice.direction
-                deviceData.uwbLocation.elevation = fakeDevice.elevation
-                deviceData.uwbLocation.isValid = true
-                deviceData.uwbLocation.isConverged = true
-                deviceData.uwbLocation.noUpdate = false
-                deviceData.uwbLocation.timestamp = fakeDevice.lastUpdate
-                deviceData.lastUpdated = fakeDevice.lastUpdate
-                deviceData.deviceName = fakeDevice.name
-                return deviceData
-            }
-            return nil
-        } else {
-            return bleManager.getDeviceData(for: currentDevice.identifier)
-        }
+        return bleManager.getDeviceData(for: currentDevice.identifier)
     }
     
     private var isDeveloperModeEnabled: Bool {
@@ -276,40 +255,53 @@ struct QorvoView: View {
     }
     
     private func updateDeviceState() {
-        let newConnectedDevices = connectedDevices
-        if connectedDevicesList.count != newConnectedDevices.count {
-            connectedDevicesList = newConnectedDevices
-            selectedDeviceIndex = 0
+        let newAvailableDevices = availableDevices
+        if connectedDevicesList.count != newAvailableDevices.count {
+            connectedDevicesList = newAvailableDevices
+            // Don't reset selectedDeviceIndex to 0 - maintain current selection if valid
+            if selectedDeviceIndex >= newAvailableDevices.count {
+                selectedDeviceIndex = max(0, newAvailableDevices.count - 1)
+            }
         }
+        
+        // Check if direction override is enabled
+        let isDirectionOverrideEnabled = UserDefaults.standard.bool(forKey: "isDirectionOverrideEnabled")
+        let forcedDirectionAngle = UserDefaults.standard.double(forKey: "forcedDirectionAngle")
         
         if let deviceData = currentDeviceData {
             if deviceData.isRanging {
                 let direction = deviceData.uwbLocation.direction
-                let azimuthValue = calculateAccurateAzimuth(direction)
                 
-                if !azimuthValue.isNaN && !azimuthValue.isInfinite {
-                    let azimuthDegrees: Double
-                    if Settings().isDirectionEnable {
-                        azimuthDegrees = 90.0 * Double(azimuthValue)
-                    } else {
-                        azimuthDegrees = Double(azimuthValue) * 180.0 / .pi
+                // Use forced direction if override is enabled, otherwise calculate normally
+                if isDirectionOverrideEnabled {
+                    rotationAngle = forcedDirectionAngle
+                } else {
+                    let azimuthValue = calculateAccurateAzimuth(direction)
+                    
+                    if !azimuthValue.isNaN && !azimuthValue.isInfinite {
+                        let azimuthDegrees: Double
+                        if Settings().isDirectionEnable {
+                            azimuthDegrees = 90.0 * Double(azimuthValue)
+                        } else {
+                            azimuthDegrees = Double(azimuthValue) * 180.0 / .pi
+                        }
+                        
+                        let targetAngle = azimuthDegrees
+                        let currentAngle = rotationAngle
+                        let angleDifference = targetAngle - currentAngle
+                        let normalizedDifference = atan2(sin(angleDifference * .pi / 180), cos(angleDifference * .pi / 180)) * 180 / .pi
+                        
+                        rotationAngle = currentAngle + (normalizedDifference * 0.8)
                     }
-                    
-                    let targetAngle = azimuthDegrees
-                    let currentAngle = rotationAngle
-                    let angleDifference = targetAngle - currentAngle
-                    let normalizedDifference = atan2(sin(angleDifference * .pi / 180), cos(angleDifference * .pi / 180)) * 180 / .pi
-                    
-                    rotationAngle = currentAngle + (normalizedDifference * 0.8)
-                    
-                    // Calculate elevation using the same logic as Qorvo example
-                    let elevationValue = calculateElevation(direction)
-                    var calculatedElevation = Int(90 * Double(elevationValue))
-                    if !Settings().isDirectionEnable {
-                        // Use verticalDirectionEstimate like Qorvo example\n                        calculatedElevation = deviceData.uwbLocation.verticalDirectionEstimate
-                    }
-                    elevation = calculatedElevation
                 }
+                
+                // Calculate elevation using the same logic as Qorvo example
+                let elevationValue = calculateElevation(direction)
+                var calculatedElevation = Int(90 * Double(elevationValue))
+                if !Settings().isDirectionEnable {
+                    // Use verticalDirectionEstimate like Qorvo example\n                    calculatedElevation = deviceData.uwbLocation.verticalDirectionEstimate
+                }
+                elevation = calculatedElevation
             }
         } else {
             rotationAngle = 0
@@ -331,6 +323,28 @@ struct QorvoView: View {
     
     private func rad2deg(_ number: Double) -> Double {
         return number * 180 / .pi
+    }
+    
+    // MARK: - Device Selection and Connection Management
+    private func handleDeviceSelection(peripheral: CBPeripheral, index: Int) {
+        // Check if device is already connected
+        if connectedDevices.contains(peripheral) {
+            // Just switch to this device without disconnecting
+            selectedDeviceIndex = index
+            return
+        }
+        
+        // Set connecting state
+        isConnecting = true
+        
+        // Connect to the new device while keeping existing connections
+        bleManager.connect(to: peripheral)
+        selectedDeviceIndex = index
+        
+        // Reset connecting state after connection attempt
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.isConnecting = false
+        }
     }
     
     
@@ -903,11 +917,29 @@ class ModernQorvoUIViewController: UIViewController {
     }
     
     private func getElevationColor(_ elevation: Int) -> UIColor {
-        switch elevation {
-        case NINearbyObject.VerticalDirectionEstimate.above.rawValue: return .systemBlue
-        case NINearbyObject.VerticalDirectionEstimate.below.rawValue: return .systemOrange
-        case NINearbyObject.VerticalDirectionEstimate.same.rawValue: return .systemGreen
-        default: return .systemGreen
+        // Check if force elevation mode is enabled
+        let forcedElevationValue = UserDefaults.standard.string(forKey: "forcedElevationValue") ?? "DISABLED"
+        
+        if forcedElevationValue != "DISABLED" {
+            // Use colors based on forced elevation value
+            switch forcedElevationValue {
+            case "ABOVE":
+                return .systemOrange  // Above should be orange
+            case "BELOW":
+                return .systemBlue    // Below should be blue
+            case "SAME LEVEL":
+                return .systemGreen   // Same level should be green
+            default:
+                return .systemGreen
+            }
+        } else {
+            // Original logic when not forced - corrected color mapping
+            switch elevation {
+            case NINearbyObject.VerticalDirectionEstimate.above.rawValue: return .systemOrange  // Above = orange
+            case NINearbyObject.VerticalDirectionEstimate.below.rawValue: return .systemBlue   // Below = blue
+            case NINearbyObject.VerticalDirectionEstimate.same.rawValue: return .systemGreen   // Same = green
+            default: return .systemGreen
+            }
         }
     }
     
@@ -917,9 +949,33 @@ class ModernQorvoUIViewController: UIViewController {
     
     // MARK: - Distance Display Helper
     private func updateDistanceDisplay(distance: Float) {
-        if distance < 1.5 {
+        // Check if distance override is enabled
+        let isDistanceOverrideEnabled = UserDefaults.standard.bool(forKey: "isDistanceOverrideEnabled")
+        let forcedDistanceString = UserDefaults.standard.string(forKey: "forcedDistanceValue") ?? ""
+        
+        var displayDistance: Float
+        if isDistanceOverrideEnabled, let forcedDistance = Float(forcedDistanceString), !forcedDistanceString.isEmpty {
+            displayDistance = forcedDistance
+        } else {
+            displayDistance = distance
+            
+            // Apply calibration offset if not using forced distance
+            let calibrationOffset = UserDefaults.standard.double(forKey: "distanceCalibrationOffset")
+            if calibrationOffset != 0 {
+                // Convert calibration offset from centimeters to meters and apply
+                let offsetInMeters = Float(calibrationOffset / 100.0)
+                displayDistance += offsetInMeters
+                
+                // Ensure distance is never below 0
+                if displayDistance < 0 {
+                    displayDistance = 0
+                }
+            }
+        }
+        
+        if displayDistance < 1.5 {
             // Show in centimeters for distances below 1.5 meters
-            let centimeters = distance * 100
+            let centimeters = displayDistance * 100
             distanceValueLabel.text = String(format: "%.0f", centimeters)
             distanceUnitLabel.text = "centimeters"
             
@@ -928,7 +984,7 @@ class ModernQorvoUIViewController: UIViewController {
             proximityMessageLabel.isHidden = false
         } else {
             // Show in meters for distances 1.5 meters and above
-            distanceValueLabel.text = String(format: "%.2f", distance)
+            distanceValueLabel.text = String(format: "%.2f", displayDistance)
             distanceUnitLabel.text = "meters"
             
             // Hide proximity message
@@ -1009,9 +1065,15 @@ struct CompactDeviceSelectorView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(Array(devices.enumerated()), id: \.element.identifier) { index, peripheral in
-                        CompactDeviceCard(peripheral: peripheral, index: index, isSelected: selectedIndex == index) {
+                        let deviceAction = { (peripheral: CBPeripheral, index: Int) in
                             selectedIndex = index
                         }
+                        CompactDeviceCard(
+                            peripheral: peripheral, 
+                            index: index, 
+                            isSelected: selectedIndex == index,
+                            onDeviceSelection: deviceAction
+                        )
                     }
                 }
                 .padding(.horizontal, 16)
@@ -1026,15 +1088,148 @@ struct CompactDeviceSelectorView: View {
     }
 }
 
+struct AvailableDeviceSelectorView: View {
+    let devices: [CBPeripheral]
+    @Binding var selectedIndex: Int
+    let connectedDevices: [CBPeripheral]
+    let isConnecting: Bool
+    let onDeviceSelection: (CBPeripheral, Int) -> Void
+    @EnvironmentObject var bleManager: BLEManager
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("All Devices (\(devices.count))")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(.white.opacity(0.7))
+                .textCase(.uppercase)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(devices.enumerated()), id: \.element.identifier) { index, peripheral in
+                        AvailableDeviceCard(
+                            peripheral: peripheral,
+                            index: index,
+                            isSelected: selectedIndex == index,
+                            isConnected: connectedDevices.contains(peripheral),
+                            isConnecting: isConnecting && selectedIndex == index,
+                            onDeviceSelection: onDeviceSelection
+                        )
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.05))
+        )
+        .padding(.horizontal, 16)
+    }
+}
+
+struct AvailableDeviceCard: View {
+    let peripheral: CBPeripheral
+    let index: Int
+    let isSelected: Bool
+    let isConnected: Bool
+    let isConnecting: Bool
+    let onDeviceSelection: (CBPeripheral, Int) -> Void
+    @EnvironmentObject var bleManager: BLEManager
+    
+    var body: some View {
+        Button(action: { onDeviceSelection(peripheral, index) }) {
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    let deviceColor = getSwiftUIDeviceColor(for: index)
+                    
+                    ZStack {
+                        Circle()
+                            .fill(isConnected ? deviceColor : Color.gray.opacity(0.6))
+                            .frame(width: 8, height: 8)
+                            .animation(.easeInOut(duration: 0.2), value: isConnected)
+                        
+                        // Add a ring around selected device
+                        if isSelected {
+                            Circle()
+                                .stroke(deviceColor, lineWidth: 2)
+                                .frame(width: 12, height: 12)
+                        }
+                    }
+                    
+                    Text(peripheral.name ?? "Unknown Device")
+                        .font(.caption)
+                        .fontWeight(isConnected ? .semibold : .medium)
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+                
+                // Show connection status and ranging info
+                if isConnecting {
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                            .scaleEffect(0.6)
+                        Text("Connecting...")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                    }
+                } else if isConnected {
+                    if let deviceData = bleManager.getDeviceData(for: peripheral.identifier) {
+                        let distance = deviceData.uwbLocation.distance
+                        let deviceColor = getSwiftUIDeviceColor(for: index)
+                        let isRanging = deviceData.isRanging
+                        
+                        VStack(spacing: 2) {
+                            Text("\(String(format: "%.1f", distance))m")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(deviceColor)
+                                .animation(.easeInOut(duration: 0.1), value: distance)
+                            
+                            Text(isRanging ? "Ranging" : "Connected")
+                                .font(.caption2)
+                                .foregroundColor(isRanging ? .green : .blue)
+                        }
+                    } else {
+                        Text("Connected")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                    }
+                } else {
+                    Text("Tap to Connect")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? getSwiftUIDeviceColor(for: index).opacity(0.3) : Color.white.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                isSelected ? getSwiftUIDeviceColor(for: index).opacity(0.8) : (isConnected ? getSwiftUIDeviceColor(for: index).opacity(0.4) : Color.clear),
+                                lineWidth: isSelected ? 2 : 1
+                            )
+                    )
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
 struct CompactDeviceCard: View {
     let peripheral: CBPeripheral
     let index: Int
     let isSelected: Bool
-    let onTap: () -> Void
+    let onDeviceSelection: (CBPeripheral, Int) -> Void
     @EnvironmentObject var bleManager: BLEManager
     
     var body: some View {
-        Button(action: onTap) {
+        Button(action: { onDeviceSelection(peripheral, index) }) {
             VStack(spacing: 4) {
                 HStack(spacing: 4) {
                     let deviceData = bleManager.getDeviceData(for: peripheral.identifier)
