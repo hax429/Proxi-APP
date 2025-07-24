@@ -27,6 +27,11 @@ struct FriendsView: View {
     @State private var approvedRequestDeviceName = ""
     
     private let logger = os.Logger(subsystem: "com.qorvo.ni", category: "FriendsView")
+    
+    // Developer mode check
+    private var isDeveloperModeEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "isDeveloperModeEnabled")
+    }
 
     // Computed property that uses BLEManager connection status or simulation
     private var hasPairedProxi: Bool {
@@ -212,18 +217,20 @@ struct FriendsView: View {
                     .fontWeight(.bold)
                     .foregroundColor(.white)
                 Spacer()
-                if !connectedDevices.isEmpty {
+                // In developer mode, always show count; otherwise only when devices are connected
+                if !connectedDevices.isEmpty || isDeveloperModeEnabled {
                     Text("\(connectedDevices.count) connected")
                         .font(.caption)
-                        .foregroundColor(.green)
+                        .foregroundColor(connectedDevices.count > 0 ? .green : .orange)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.green.opacity(0.2))
+                        .background((connectedDevices.count > 0 ? Color.green : Color.orange).opacity(0.2))
                         .cornerRadius(8)
                 }
             }
             
-            if connectedDevices.isEmpty {
+            // In developer mode, don't show empty state - always show device list
+            if connectedDevices.isEmpty && !isDeveloperModeEnabled {
                 emptyConnectedDevicesView
             } else {
                 VStack(spacing: 8) {

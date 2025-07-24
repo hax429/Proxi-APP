@@ -190,10 +190,20 @@ struct QorvoView: View {
     /**
      * Available devices from BLE manager discovery
      * Returns array of discovered CBPeripheral objects for display selection
+     * Filters out unwanted devices when developer mode is enabled
      */
     private var availableDevices: [CBPeripheral] {
         return bleManager.discoveredPeripherals.filter { peripheral in
-            peripheral.name != "Adafruit Bluefruit LE AA68"
+            let deviceName = peripheral.name ?? "Unknown Device"
+            
+            // When developer mode is enabled, filter out specific devices
+            if isDeveloperModeEnabled {
+                return deviceName != "Unknown Device" && 
+                       deviceName != "Adafruit Bluefruit LE AA68"
+            } else {
+                // Original filtering logic for non-developer mode
+                return deviceName != "Adafruit Bluefruit LE AA68"
+            }
         }
     }
     
@@ -204,14 +214,28 @@ struct QorvoView: View {
      * Returns the device at the selected index, or nil if no devices available
      */
     private var currentDevice: CBPeripheral? {
-        guard !availableDevices.isEmpty else { return nil }
+        guard !availableDevices.isEmpty else { 
+            print("🎯 No available devices")
+            return nil 
+        }
         let safeIndex = min(selectedDeviceIndex, availableDevices.count - 1)
-        return availableDevices[safeIndex]
+        let device = availableDevices[safeIndex]
+        print("🎯 Current device: \(device.name ?? "Unknown") at index \(safeIndex)")
+        return device
     }
     
     private var currentDeviceData: BLEManager.DeviceData? {
-        guard let currentDevice = currentDevice else { return nil }
-        return bleManager.getDeviceData(for: currentDevice.identifier)
+        guard let currentDevice = currentDevice else { 
+            print("🎯 No current device for data lookup")
+            return nil 
+        }
+        let deviceData = bleManager.getDeviceData(for: currentDevice.identifier)
+        if let data = deviceData {
+            print("🎯 Device data found for \(currentDevice.name ?? "Unknown"): ranging=\(data.isRanging), distance=\(data.uwbLocation.distance)")
+        } else {
+            print("🎯 No device data found for \(currentDevice.name ?? "Unknown") (ID: \(currentDevice.identifier))")
+        }
+        return deviceData
     }
     
     private var isDeveloperModeEnabled: Bool {
@@ -230,6 +254,58 @@ struct QorvoView: View {
             // Post notification for immediate UI updates
             NotificationCenter.default.post(name: NSNotification.Name("UWBLocationUpdated"), object: nil)
         }
+        
+        // Add periodic detailed debug info every 2 seconds
+        Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            self.logDetailedDebugInfo()
+        }
+    }
+    
+    private func logDetailedDebugInfo() {
+        print("\n=== 🔍 DETAILED DEBUG INFO ===")
+        print("📊 Available devices: \(availableDevices.count)")
+        print("📊 Connected devices: \(connectedDevices.count)")
+        print("📊 Selected device index: \(selectedDeviceIndex)")
+        print("📊 Developer mode: \(isDeveloperModeEnabled)")
+        print("📊 Is connecting: \(isConnecting)")
+        
+        print("📊 Available devices list:")
+        for (index, device) in availableDevices.enumerated() {
+            let isSelected = index == selectedDeviceIndex
+            let isConnected = connectedDevices.contains(device)
+            print("   [\(index)] \(device.name ?? "Unknown") - Selected: \(isSelected), Connected: \(isConnected)")
+            print("       ID: \(device.identifier)")
+        }
+        
+        if let current = currentDevice {
+            print("📊 Current device: \(current.name ?? "Unknown")")
+            print("📊 Current device ID: \(current.identifier)")
+            print("📊 Is current device connected: \(connectedDevices.contains(current))")
+            
+            if let data = bleManager.getDeviceData(for: current.identifier) {
+                print("📊 Device data exists: YES")
+                print("📊 Is ranging: \(data.isRanging)")
+                print("📊 Distance: \(data.uwbLocation.distance)")
+                print("📊 Location valid: \(data.uwbLocation.isValid)")
+                print("📊 Direction: (\(data.uwbLocation.direction.x), \(data.uwbLocation.direction.y), \(data.uwbLocation.direction.z))")
+            } else {
+                print("📊 Device data exists: NO - DEVICE NOT CONNECTED TO BLE!")
+                print("📊 ❌ This means Arduino UWB is discovered but not connected")
+                print("📊 ❌ You need to TAP the Arduino UWB device to connect to it")
+            }
+        } else {
+            print("📊 Current device: NONE")
+        }
+        
+        print("📊 All connected devices:")
+        if connectedDevices.isEmpty {
+            print("   ❌ NO DEVICES CONNECTED - You need to tap a device to connect!")
+        } else {
+            for device in connectedDevices {
+                print("   ✅ \(device.name ?? "Unknown"): \(device.identifier)")
+            }
+        }
+        print("=== END DEBUG INFO ===\n")
     }
     
     private func saveCalibrationOffset() {
@@ -258,6 +334,7 @@ struct QorvoView: View {
         let newAvailableDevices = availableDevices
         if connectedDevicesList.count != newAvailableDevices.count {
             connectedDevicesList = newAvailableDevices
+            print("📊 Device list changed - Available: \(newAvailableDevices.count), Connected: \(connectedDevices.count)")
             // Don't reset selectedDeviceIndex to 0 - maintain current selection if valid
             if selectedDeviceIndex >= newAvailableDevices.count {
                 selectedDeviceIndex = max(0, newAvailableDevices.count - 1)
@@ -269,14 +346,22 @@ struct QorvoView: View {
         let forcedDirectionAngle = UserDefaults.standard.double(forKey: "forcedDirectionAngle")
         
         if let deviceData = currentDeviceData {
+            print("📡 Current device data found - Device: \(currentDevice?.name ?? "Unknown")")
+            print("📡 Is Ranging: \(deviceData.isRanging)")
+            print("📡 Distance: \(deviceData.uwbLocation.distance)")
+            print("📡 Is Valid: \(deviceData.uwbLocation.isValid)")
+            
             if deviceData.isRanging {
                 let direction = deviceData.uwbLocation.direction
+                print("📡 Direction vector: x=\(direction.x), y=\(direction.y), z=\(direction.z)")
                 
                 // Use forced direction if override is enabled, otherwise calculate normally
                 if isDirectionOverrideEnabled {
                     rotationAngle = forcedDirectionAngle
+                    print("📡 Using forced direction: \(forcedDirectionAngle)")
                 } else {
                     let azimuthValue = calculateAccurateAzimuth(direction)
+                    print("📡 Calculated azimuth: \(azimuthValue)")
                     
                     if !azimuthValue.isNaN && !azimuthValue.isInfinite {
                         let azimuthDegrees: Double
@@ -292,6 +377,7 @@ struct QorvoView: View {
                         let normalizedDifference = atan2(sin(angleDifference * .pi / 180), cos(angleDifference * .pi / 180)) * 180 / .pi
                         
                         rotationAngle = currentAngle + (normalizedDifference * 0.8)
+                        print("📡 Updated rotation angle: \(rotationAngle)")
                     }
                 }
                 
@@ -302,8 +388,15 @@ struct QorvoView: View {
                     // Use verticalDirectionEstimate like Qorvo example\n                    calculatedElevation = deviceData.uwbLocation.verticalDirectionEstimate
                 }
                 elevation = calculatedElevation
+                print("📡 Updated elevation: \(elevation)")
+            } else {
+                print("📡 Device not ranging - no UWB data")
             }
         } else {
+            print("📡 No current device data available")
+            print("📡 Current device: \(currentDevice?.name ?? "None")")
+            print("📡 Selected device index: \(selectedDeviceIndex)")
+            print("📡 Available devices: \(availableDevices.map { $0.name ?? "Unknown" })")
             rotationAngle = 0
             elevation = 0
         }
@@ -327,23 +420,74 @@ struct QorvoView: View {
     
     // MARK: - Device Selection and Connection Management
     private func handleDeviceSelection(peripheral: CBPeripheral, index: Int) {
-        // Check if device is already connected
-        if connectedDevices.contains(peripheral) {
-            // Just switch to this device without disconnecting
+        // In developer mode, auto-connect when switching tabs
+        if isDeveloperModeEnabled {
+            print("📱 Developer Mode: Switching to device tab \(peripheral.name ?? "Unknown") (Index: \(index))")
+            
+            // Force disconnect all currently connected devices (BLE + UWB)
+            if !connectedDevices.isEmpty {
+                for connectedDevice in connectedDevices {
+                    print("🔌 Developer Mode: Forcefully disconnecting \(connectedDevice.name ?? "Unknown") (ID: \(connectedDevice.identifier))")
+                    bleManager.disconnect(peripheralID: connectedDevice.identifier)
+                }
+                
+                // Additional safety: Force disconnectAll to ensure complete cleanup
+                print("🔌 Developer Mode: Forcing complete disconnection of all devices")
+                bleManager.disconnectAll()
+            }
+            
+            // Switch to the selected device tab
             selectedDeviceIndex = index
-            return
-        }
-        
-        // Set connecting state
-        isConnecting = true
-        
-        // Connect to the new device while keeping existing connections
-        bleManager.connect(to: peripheral)
-        selectedDeviceIndex = index
-        
-        // Reset connecting state after connection attempt
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            self.isConnecting = false
+            
+            // Auto-connect to the new device after brief cleanup delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                print("🔗 Developer Mode: Auto-connecting to \(peripheral.name ?? "Unknown")")
+                print("🔗 Device ID: \(peripheral.identifier)")
+                print("🔗 Available devices count: \(self.availableDevices.count)")
+                print("🔗 Connected devices count: \(self.connectedDevices.count)")
+                
+                self.isConnecting = true
+                self.bleManager.connect(to: peripheral)
+                
+                // Reset connecting state after connection attempt
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    self.isConnecting = false
+                    print("🔗 Connection attempt finished - isConnecting reset to false")
+                    print("🔗 Connected devices after connection: \(self.connectedDevices.count)")
+                    
+                    // Log the successful switch and connection
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("DeviceAutoConnectedInDeveloperMode"), 
+                        object: nil, 
+                        userInfo: [
+                            "deviceName": peripheral.name ?? "Unknown",
+                            "deviceID": peripheral.identifier.uuidString,
+                            "tabIndex": index,
+                            "connected": self.connectedDevices.contains(peripheral)
+                        ]
+                    )
+                }
+            }
+            
+        } else {
+            // Original behavior: Check if device is already connected
+            if connectedDevices.contains(peripheral) {
+                // Just switch to this device without disconnecting
+                selectedDeviceIndex = index
+                return
+            }
+            
+            // Set connecting state
+            isConnecting = true
+            
+            // Connect to the new device while keeping existing connections
+            bleManager.connect(to: peripheral)
+            selectedDeviceIndex = index
+            
+            // Reset connecting state after connection attempt
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                self.isConnecting = false
+            }
         }
     }
     

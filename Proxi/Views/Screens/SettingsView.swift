@@ -351,7 +351,8 @@ extension SettingsView {
             
             VStack(spacing: 12) {
                 // Combined Status and Connected Device - When device is connected
-                if connectedDevicesCount > 0 {
+                // In developer mode, always show devices regardless of connection status
+                if connectedDevicesCount > 0 || isDeveloperModeEnabled {
                     ForEach(Array(bleManager.connectedPeripherals.values), id: \.identifier) { peripheral in
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
@@ -415,8 +416,8 @@ extension SettingsView {
                     .cornerRadius(12)
                 }
                 
-                // Scanning Controls - Only show when no devices are connected
-                if connectedDevicesCount == 0 {
+                // Scanning Controls - Only show when no devices are connected (unless developer mode)
+                if connectedDevicesCount == 0 && !isDeveloperModeEnabled {
                     HStack(spacing: 12) {
                         Button(action: startScanning) {
                             HStack {
@@ -446,8 +447,8 @@ extension SettingsView {
                     }
                 }
                 
-                // Discovered Devices List - Only show when no devices are connected
-                if discoveredDevicesCount > 0 && connectedDevicesCount == 0 {
+                // Discovered Devices List - Only show when no devices are connected (unless developer mode)
+                if discoveredDevicesCount > 0 && (connectedDevicesCount == 0 && !isDeveloperModeEnabled) {
                     VStack(alignment: .leading, spacing: 8) {
                         
                         Text("Discovered Devices")
@@ -698,6 +699,37 @@ extension SettingsView {
                     .cornerRadius(12)
                 }
                 .buttonStyle(PlainButtonStyle())
+                
+                // Device Switcher Control
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("QorvoView Device Switcher")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                        
+                        Text("Enable device switching tabs in QorvoView for multi-device connections")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    
+                    HStack {
+                        Image(systemName: "switch.2")
+                            .foregroundColor(.blue)
+                        
+                        Text("Show Device Switcher in QorvoView")
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        Toggle("", isOn: .constant(true))
+                            .toggleStyle(SwitchToggleStyle(tint: .blue))
+                            .disabled(true)
+                    }
+                }
+                .padding()
+                .background(Color(hex: "232229"))
+                .cornerRadius(12)
             }
         }
     }
