@@ -3,10 +3,10 @@
 
 // Enhanced multi-device support
 #define MAX_CONNECTED_DEVICES 8
-#define HEARTBEAT_INTERVAL 1000  // 1 second for faster updates
-#define CONNECTION_TIMEOUT 10000  // 10 seconds for quicker timeout detection
-#define KEEPALIVE_INTERVAL 2000   // 2 seconds keepalive ping
-#define ADVERTISE_CHECK_INTERVAL 1000  // Check advertising every second
+#define HEARTBEAT_INTERVAL 5000  // 5 seconds for power saving
+#define CONNECTION_TIMEOUT 30000  // 30 seconds timeout for better power efficiency
+#define KEEPALIVE_INTERVAL 10000   // 10 seconds keepalive ping for power saving
+#define ADVERTISE_CHECK_INTERVAL 5000  // Check advertising every 5 seconds
 
 // Device tracking structure
 struct ConnectedDevice {

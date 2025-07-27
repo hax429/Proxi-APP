@@ -8,6 +8,7 @@
 import SwiftUI
 import PhotosUI
 import MessageUI
+import UserNotifications
 
 // MARK: - Placeholder Views for Sheets
 struct ProfileView: View {
@@ -164,15 +165,155 @@ struct ProfileView: View {
 }
 
 struct NotificationsView: View {
+    @State private var showingScheduleNotification = false
+    @State private var scheduledNotifications: [ScheduledNotification] = []
+    @Environment(\.presentationMode) var presentationMode
+    
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            VStack {
-                Text("Notifications")
-                    .font(.title)
+            
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Button("Back") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
                     .foregroundColor(.white)
-                Text("Notification settings coming soon...")
-                    .foregroundColor(.white.opacity(0.7))
+                    
+                    Spacer()
+                    
+                    Text("Notifications")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Button("Add") {
+                        showingScheduleNotification = true
+                    }
+                    .foregroundColor(.blue)
+                }
+                .padding()
+                
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Scheduled Notifications Section
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Scheduled Notifications")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            if scheduledNotifications.isEmpty {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "bell.slash")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(.gray)
+                                    
+                                    Text("No scheduled notifications")
+                                        .font(.subheadline)
+                                        .foregroundColor(.white.opacity(0.7))
+                                    
+                                    Text("Tap 'Add' to create your first notification")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.5))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 40)
+                            } else {
+                                ForEach(scheduledNotifications) { notification in
+                                    NotificationRowView(
+                                        notification: notification,
+                                        onDelete: { deleteNotification(notification) },
+                                        onToggle: { toggleNotification(notification) }
+                                    )
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color(hex: "232229"))
+                        .cornerRadius(12)
+                        
+                        Spacer()
+                    }
+                    .padding()
+                }
+            }
+        }
+        .sheet(isPresented: $showingScheduleNotification) {
+            ScheduleNotificationView { notification in
+                addNotification(notification)
+            }
+        }
+        .onAppear {
+            loadNotifications()
+            requestNotificationPermission()
+        }
+    }
+    
+    private func loadNotifications() {
+        if let data = UserDefaults.standard.data(forKey: "scheduledNotifications"),
+           let notifications = try? JSONDecoder().decode([ScheduledNotification].self, from: data) {
+            scheduledNotifications = notifications
+        }
+    }
+    
+    private func saveNotifications() {
+        if let data = try? JSONEncoder().encode(scheduledNotifications) {
+            UserDefaults.standard.set(data, forKey: "scheduledNotifications")
+        }
+    }
+    
+    private func addNotification(_ notification: ScheduledNotification) {
+        scheduledNotifications.append(notification)
+        saveNotifications()
+        scheduleLocalNotification(notification)
+    }
+    
+    private func deleteNotification(_ notification: ScheduledNotification) {
+        scheduledNotifications.removeAll { $0.id == notification.id }
+        saveNotifications()
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [notification.id.uuidString])
+    }
+    
+    private func toggleNotification(_ notification: ScheduledNotification) {
+        if let index = scheduledNotifications.firstIndex(where: { $0.id == notification.id }) {
+            scheduledNotifications[index].isEnabled.toggle()
+            saveNotifications()
+            
+            if scheduledNotifications[index].isEnabled {
+                scheduleLocalNotification(scheduledNotifications[index])
+            } else {
+                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [notification.id.uuidString])
+            }
+        }
+    }
+    
+    private func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+            if let error = error {
+                print("Notification permission error: \(error)")
+            }
+        }
+    }
+    
+    private func scheduleLocalNotification(_ notification: ScheduledNotification) {
+        let content = UNMutableNotificationContent()
+        content.title = "Proxi Reminder"
+        content.body = notification.message
+        content.sound = .default
+        
+        var dateComponents = DateComponents()
+        dateComponents.hour = Calendar.current.component(.hour, from: notification.time)
+        dateComponents.minute = Calendar.current.component(.minute, from: notification.time)
+        
+        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: notification.repeats)
+        let request = UNNotificationRequest(identifier: notification.id.uuidString, content: content, trigger: trigger)
+        
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("Error scheduling notification: \(error)")
             }
         }
     }
@@ -744,6 +885,213 @@ struct MailUnavailableView: View {
     }
 }
 
+
+// MARK: - Notification Models and Views
+
+struct ScheduledNotification: Identifiable, Codable {
+    let id = UUID()
+    var time: Date
+    var message: String
+    var isEnabled: Bool = true
+    var repeats: Bool = false
+}
+
+struct NotificationRowView: View {
+    let notification: ScheduledNotification
+    let onDelete: () -> Void
+    let onToggle: () -> Void
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(notification.message)
+                    .font(.body)
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                
+                HStack {
+                    Text(DateFormatter.timeFormatter.string(from: notification.time))
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                    
+                    if notification.repeats {
+                        Image(systemName: "repeat")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                }
+            }
+            
+            Spacer()
+            
+            VStack {
+                Toggle("", isOn: Binding(
+                    get: { notification.isEnabled },
+                    set: { _ in onToggle() }
+                ))
+                .toggleStyle(SwitchToggleStyle(tint: .blue))
+                
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding()
+        .background(Color.black.opacity(0.3))
+        .cornerRadius(8)
+    }
+}
+
+struct ScheduleNotificationView: View {
+    @State private var selectedTime = Date()
+    @State private var notificationMessage = ""
+    @State private var repeatsDaily = false
+    @Environment(\.presentationMode) var presentationMode
+    
+    let onSave: (ScheduledNotification) -> Void
+    
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Text("Schedule Notification")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Button("Save") {
+                        let notification = ScheduledNotification(
+                            time: selectedTime,
+                            message: notificationMessage,
+                            repeats: repeatsDaily
+                        )
+                        onSave(notification)
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(.blue)
+                    .disabled(notificationMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding()
+                
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Time Selection
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Notification Time")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            DatePicker("", selection: $selectedTime, displayedComponents: .hourAndMinute)
+                                .datePickerStyle(WheelDatePickerStyle())
+                                .labelsHidden()
+                                .colorScheme(.dark)
+                        }
+                        .padding()
+                        .background(Color(hex: "232229"))
+                        .cornerRadius(12)
+                        
+                        // Message Input
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Notification Message")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            TextField("Enter your reminder message...", text: $notificationMessage, axis: .vertical)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .lineLimit(3...6)
+                        }
+                        .padding()
+                        .background(Color(hex: "232229"))
+                        .cornerRadius(12)
+                        
+                        // Repeat Option
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Repeat Settings")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            Toggle("Repeat Daily", isOn: $repeatsDaily)
+                                .toggleStyle(SwitchToggleStyle(tint: .blue))
+                                .foregroundColor(.white)
+                        }
+                        .padding()
+                        .background(Color(hex: "232229"))
+                        .cornerRadius(12)
+                        
+                        // Preview
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Preview")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Image(systemName: "bell")
+                                        .foregroundColor(.blue)
+                                    Text("Proxi Reminder")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.white)
+                                }
+                                
+                                Text(notificationMessage.isEmpty ? "Your reminder message will appear here" : notificationMessage)
+                                    .font(.body)
+                                    .foregroundColor(notificationMessage.isEmpty ? .white.opacity(0.5) : .white)
+                                    .italic(notificationMessage.isEmpty)
+                                
+                                HStack {
+                                    Text(DateFormatter.timeFormatter.string(from: selectedTime))
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                    
+                                    if repeatsDaily {
+                                        Text("• Daily")
+                                            .font(.caption)
+                                            .foregroundColor(.blue)
+                                    }
+                                }
+                            }
+                            .padding()
+                            .background(Color.black.opacity(0.3))
+                            .cornerRadius(8)
+                        }
+                        .padding()
+                        .background(Color(hex: "232229"))
+                        .cornerRadius(12)
+                        
+                        Spacer()
+                    }
+                    .padding()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Extensions
+
+extension DateFormatter {
+    static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
 
 //MARK: Setting Extensions
 

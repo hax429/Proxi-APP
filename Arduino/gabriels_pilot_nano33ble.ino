@@ -3,10 +3,10 @@
 
 // Enhanced multi-device support
 #define MAX_CONNECTED_DEVICES 8
-#define HEARTBEAT_INTERVAL 1000  // 1 second for faster updates
-#define CONNECTION_TIMEOUT 10000  // 10 seconds for quicker timeout detection
-#define KEEPALIVE_INTERVAL 2000   // 2 seconds keepalive ping
-#define ADVERTISE_CHECK_INTERVAL 1000  // Check advertising every second
+#define HEARTBEAT_INTERVAL 15000  // 15 seconds for better power saving
+#define CONNECTION_TIMEOUT 60000  // 60 seconds timeout for power efficiency
+#define KEEPALIVE_INTERVAL 30000   // 30 seconds keepalive ping for power saving
+#define ADVERTISE_CHECK_INTERVAL 10000  // Check advertising every 10 seconds
 
 // Device tracking structure
 struct ConnectedDevice {
@@ -34,6 +34,60 @@ bool isAdvertising = false;
 bool shouldBeAdvertising = true;
 
 /**
+ * @brief CRITICAL: Ensure BLE advertising continues for multi-device support
+ * This is the key function that enables multiple simultaneous connections
+ */
+void ensureBLEAdvertising() {
+  // Only advertise if we have space for more devices
+  if (deviceCount < MAX_CONNECTED_DEVICES && shouldBeAdvertising) {
+    
+    // Check current advertising state
+    bool currentlyAdvertising = isAdvertising;
+    
+    if (!currentlyAdvertising) {
+      // CRITICAL: Restart advertising immediately
+      // This is the key to allowing multiple connections
+      if (BLE.advertise()) {
+        isAdvertising = true;
+      } else {
+        isAdvertising = false;
+      }
+    } else {
+      // Already advertising - periodic confirmation
+      if (!isAdvertising) {
+        isAdvertising = true;
+      }
+    }
+    
+  } else if (deviceCount >= MAX_CONNECTED_DEVICES) {
+    // Stop advertising if we're at max capacity
+    if (isAdvertising) {
+      BLE.stopAdvertise();
+      isAdvertising = false;
+    }
+  }
+}
+
+/**
+ * @brief Force restart BLE advertising
+ * Call this if advertising seems stuck
+ */
+void forceRestartAdvertising() {
+  // Stop advertising first
+  if (isAdvertising) {
+    BLE.stopAdvertise();
+    delay(50);  // Brief delay - reduced for power saving
+  }
+  
+  // Restart advertising
+  if (BLE.advertise()) {
+    isAdvertising = true;
+  } else {
+    isAdvertising = false;
+  }
+}
+
+/**
  * @brief Find device in connected devices array
  * @param address Device BLE address
  * @return Index of device or -1 if not found
@@ -54,7 +108,6 @@ int findDeviceIndex(String address) {
  */
 bool addDevice(BLEDevice dev) {
   if (deviceCount >= MAX_CONNECTED_DEVICES) {
-    Serial.println("ERROR: Maximum number of connected devices reached");
     return false;
   }
   
@@ -66,15 +119,11 @@ bool addDevice(BLEDevice dev) {
   connectedDevices[deviceCount].hasActiveSession = false;
   connectedDevices[deviceCount].deviceId = nextDeviceId++;
   
-  Serial.print("Added device ");
-  Serial.print(deviceCount);
-  Serial.print(": ");
-  Serial.print(address);
-  Serial.print(" (ID: ");
-  Serial.print(connectedDevices[deviceCount].deviceId);
-  Serial.println(")");
-  
   deviceCount++;
+  
+  // CRITICAL: Force advertising restart after adding a device
+  ensureBLEAdvertising();
+  
   return true;
 }
 
@@ -85,18 +134,8 @@ bool addDevice(BLEDevice dev) {
 void removeDevice(String address) {
   int index = findDeviceIndex(address);
   if (index == -1) {
-    Serial.print("WARNING: Device not found for removal: ");
-    Serial.println(address);
     return;
   }
-  
-  Serial.print("Removing device ");
-  Serial.print(index);
-  Serial.print(": ");
-  Serial.print(address);
-  Serial.print(" (ID: ");
-  Serial.print(connectedDevices[index].deviceId);
-  Serial.println(")");
   
   // Shift remaining devices to fill the gap
   for (int i = index; i < deviceCount - 1; i++) {
@@ -109,6 +148,9 @@ void removeDevice(String address) {
   if (deviceCount == 0) {
     nextDeviceId = 1;
   }
+  
+  // CRITICAL: Ensure advertising continues after device removal
+  ensureBLEAdvertising();
 }
 
 /**
@@ -130,9 +172,6 @@ void cleanupInactiveDevices() {
   
   for (int i = deviceCount - 1; i >= 0; i--) {
     if (currentTime - connectedDevices[i].lastActivity > CONNECTION_TIMEOUT) {
-      Serial.print("Device ");
-      Serial.print(connectedDevices[i].address);
-      Serial.println(" timed out - removing");
       removeDevice(connectedDevices[i].address);
     }
   }
@@ -162,14 +201,6 @@ void sendKeepalive() {
       connectedDevices[i].lastActivity = millis();
     }
   }
-  
-  // Optional: Send a lightweight ping message to active sessions
-  // This helps detect silent connection failures early
-  if (getActiveDeviceCount() > 0) {
-    Serial.print("💓 Keepalive sent to ");
-    Serial.print(getActiveDeviceCount());
-    Serial.println(" active sessions");
-  }
 }
 
 /**
@@ -177,9 +208,6 @@ void sendKeepalive() {
  * @param rangingData the received data
  */
 void rangingHandler(UWBRangingData &rangingData) {
-  Serial.print("GOT RANGING DATA - Type: ");
-  Serial.println(rangingData.measureType());
-
   //nearby interaction is based on Double-sided Two-way Ranging method
   if(rangingData.measureType()==(uint8_t)uwb::MeasurementType::TWO_WAY) {
     //get the TWR (Two-Way Ranging) measurements
@@ -188,9 +216,8 @@ void rangingHandler(UWBRangingData &rangingData) {
     for(int j=0;j<rangingData.available();j++) {
       //if the measure is valid
       if(twr[j].status==0 && twr[j].distance!=0xFFFF) {
-        //print the measure
-        Serial.print("Distance: ");
-        Serial.println(twr[j].distance);
+        // Distance data is available but not printed for power saving
+        // Can be processed here if needed
       }
     }
   }
@@ -201,59 +228,37 @@ void rangingHandler(UWBRangingData &rangingData) {
  * @param dev the client BLE device
  */
 void clientConnected(BLEDevice dev) {
-  Serial.println("📱 ========== CLIENT CONNECTED EVENT ==========");
-  Serial.print("📱 BLE Client connected: ");
-  Serial.println(dev.address());
-  Serial.print("📱 Device count before adding: ");
-  Serial.println(deviceCount);
-  
   // Add device to tracking array
   if (!addDevice(dev)) {
-    Serial.println("ERROR: Failed to add device - maximum connections reached");
     return;
   }
   
   // Initialize UWB stack upon first connection
   if (deviceCount == 1) {
-    Serial.println("🎯 First device connected - initializing UWB stack...");
     if (!uwbInitialized) {
-      Serial.println("🔧 Starting UWB.begin()...");
       UWB.begin();  // Remove boolean check as this method returns void
       uwbInitialized = true;
-      Serial.println("✅ UWB stack initialized successfully");
-      Serial.println("🎯 UWB is now ready for ranging");
       
       // Force start ranging for all connected devices
       for (int i = 0; i < deviceCount; i++) {
         if (connectedDevices[i].isActive) {
           connectedDevices[i].hasActiveSession = true;
-          Serial.print("✅ Device ");
-          Serial.print(connectedDevices[i].deviceId);
-          Serial.println(" marked as having active UWB session");
         }
       }
-    } else {
-      Serial.println("⚠️ UWB already initialized");
     }
   } else {
-    Serial.print("🔧 Additional device connected (total: ");
-    Serial.print(deviceCount);
-    Serial.println(")");
-    
     // If UWB is already initialized, start session for this device
     if (uwbInitialized) {
       int index = findDeviceIndex(dev.address());
       if (index != -1) {
         connectedDevices[index].hasActiveSession = true;
-        Serial.print("✅ Device ");
-        Serial.print(connectedDevices[index].deviceId);
-        Serial.println(" added to active UWB session");
       }
     }
   }
   
-  Serial.print("Total connected devices: ");
-  Serial.println(deviceCount);
+  // CRITICAL: This is the most important part for multi-device support
+  // Force advertising to continue after connection
+  ensureBLEAdvertising();
 }
 
 /**
@@ -261,20 +266,19 @@ void clientConnected(BLEDevice dev) {
  * @param dev 
  */
 void clientDisconnected(BLEDevice dev) {
-  Serial.print("BLE Client disconnected: ");
-  Serial.println(dev.address());
-  
   // Remove device from tracking array
   removeDevice(dev.address());
   
-  Serial.print("Remaining connected devices: ");
-  Serial.println(deviceCount);
-  
-  // Keep UWB running even when no devices are connected
-  // This ensures we stay ready for new connections
+  // Deinitialize UWB stack if no devices are connected
   if(deviceCount == 0) {
-    Serial.println("No devices connected, but keeping UWB active for new connections...");
+    if (uwbInitialized) {
+      UWB.end();
+      uwbInitialized = false;
+    }
   }
+  
+  // CRITICAL: Ensure advertising resumes after disconnection
+  ensureBLEAdvertising();
 }
 
 /**
@@ -283,21 +287,13 @@ void clientDisconnected(BLEDevice dev) {
  */
 void sessionStarted(BLEDevice dev) {
   String address = dev.address();
-  Serial.print("UWB Session started with: ");
-  Serial.println(address);
   
   // Update device session status
   int index = findDeviceIndex(address);
   if (index != -1) {
     connectedDevices[index].hasActiveSession = true;
     connectedDevices[index].lastActivity = millis();
-    Serial.print("Device ");
-    Serial.print(connectedDevices[index].deviceId);
-    Serial.println(" now has active UWB session");
   }
-  
-  Serial.print("Active UWB sessions: ");
-  Serial.println(getActiveDeviceCount());
 }
 
 /**
@@ -306,74 +302,24 @@ void sessionStarted(BLEDevice dev) {
  */
 void sessionStopped(BLEDevice dev) {
   String address = dev.address();
-  Serial.print("UWB Session stopped with: ");
-  Serial.println(address);
   
   // Update device session status
   int index = findDeviceIndex(address);
   if (index != -1) {
     connectedDevices[index].hasActiveSession = false;
-    Serial.print("Device ");
-    Serial.print(connectedDevices[index].deviceId);
-    Serial.println(" UWB session terminated");
   }
-  
-  Serial.print("Active UWB sessions: ");
-  Serial.println(getActiveDeviceCount());
 }
 
-/**
- * @brief Print detailed status information
- */
-void printStatus() {
-  Serial.println("=== Device Status ===");
-  Serial.print("Total connected devices: ");
-  Serial.println(deviceCount);
-  Serial.print("Active UWB sessions: ");
-  Serial.println(getActiveDeviceCount());
-  Serial.print("UWB initialized: ");
-  Serial.println(uwbInitialized ? "YES" : "NO");
-  
-  if (deviceCount > 0) {
-    Serial.println("Connected devices:");
-    for (int i = 0; i < deviceCount; i++) {
-      Serial.print("  ");
-      Serial.print(i);
-      Serial.print(": ");
-      Serial.print(connectedDevices[i].address);
-      Serial.print(" (ID: ");
-      Serial.print(connectedDevices[i].deviceId);
-      Serial.print(") - Active: ");
-      Serial.print(connectedDevices[i].isActive ? "YES" : "NO");
-      Serial.print(", Session: ");
-      Serial.print(connectedDevices[i].hasActiveSession ? "YES" : "NO");
-      Serial.print(", Last activity: ");
-      Serial.print((millis() - connectedDevices[i].lastActivity) / 1000);
-      Serial.println("s ago");
-    }
-  }
-  Serial.println("===================");
-}
 
 void setup() {
+  // Minimal serial initialization for critical errors only
   Serial.begin(115200);
-  while (!Serial) {
-    ; // Wait for serial port to connect
-  }
-  
-  Serial.println("=== Proxi Arduino UWB Device (Multi-Device Enhanced) ===");
-  Serial.println("Initializing...");
 
 #if defined(ARDUINO_PORTENTA_C33)
   /* Only the Portenta C33 has an RGB LED. */
   pinMode(LEDR, OUTPUT);
   digitalWrite(LEDR, LOW);
-  Serial.println("Portenta C33 detected");
 #endif
-
-  Serial.println("Starting enhanced nearby interaction app...");
-  Serial.print("Maximum supported devices: ");
-  Serial.println(MAX_CONNECTED_DEVICES);
 
   // Initialize device tracking array
   for (int i = 0; i < MAX_CONNECTED_DEVICES; i++) {
@@ -382,7 +328,7 @@ void setup() {
     connectedDevices[i].lastActivity = 0;
   }
 
-  //register the callback for ranging data (but don't initialize UWB yet)
+  //register the callback for ranging data
   UWB.registerRangingCallback(rangingHandler);
   
   //register the callback for client connection/disconnection events
@@ -393,41 +339,64 @@ void setup() {
   UWBNearbySessionManager.onSessionStart(sessionStarted);
   UWBNearbySessionManager.onSessionStop(sessionStopped);
 
+  // Initialize BLE manually first
+  if (!BLE.begin()) {
+    while (1);
+  }
+  
+  // Set device name BEFORE UWB initialization
+  BLE.setLocalName("Gabriel's Pilot");
+  BLE.setDeviceName("Gabriel's Pilot");
+  
   //init the BLE services and characteristic, advertise with device name
-  Serial.println("Initializing BLE services...");
-  UWBNearbySessionManager.begin("Gabriel's Pilot");
-  Serial.println("BLE services initialized successfully");
-  Serial.println("Advertising as 'Gabriel's Pilot'");
+  UWBNearbySessionManager.begin("Gabriel's Pilot");  // Name ending with "Pilot" for filtering
   
-  // DON'T initialize UWB here - wait for first device connection
-  Serial.println("UWB initialization will happen when first device connects");
-  Serial.println("This ensures proper initialization sequence");
+  // Add delay for BLE stack initialization
+  delay(500);  // Reduced delay for power saving
   
-  // Small delay to ensure everything is properly initialized
-  delay(1000);
+  // CRITICAL: Ensure advertising is active from the start
+  isAdvertising = true;  // Assume advertising starts after UWBNearbySessionManager.begin()
   
-  Serial.println("Setup complete. Waiting for connections...");
+  // Try to start advertising manually
+  BLE.stopAdvertise();  // Stop any existing advertising
+  delay(200);  // Reduced delay
+  
+  if (BLE.advertise()) {
+    isAdvertising = true;
+  } else {
+    isAdvertising = false;
+  }
+  
+  if (!isAdvertising) {
+    forceRestartAdvertising();
+  }
 }
 
 void loop() {
-  // Reduced delay for more responsive communication
-  delay(20);  // 20ms instead of 100ms for 5x faster polling
+  // Optimized delay for power saving while maintaining responsiveness
+  delay(50);  // 50ms for balanced power consumption and responsiveness
   
-  //poll the BLE stack more frequently
+  //poll the BLE stack
   UWBNearbySessionManager.poll();
   
   // Clean up inactive devices
   cleanupInactiveDevices();
   
-  // Send keepalive to maintain active connections
+  // CRITICAL: Check advertising status periodically
+  // This is the key to maintaining multi-device connectivity
+  if (millis() - lastAdvertiseCheck > ADVERTISE_CHECK_INTERVAL) {
+    ensureBLEAdvertising();
+    lastAdvertiseCheck = millis();
+  }
+  
+  // Send keepalive to maintain active connections (less frequent)
   if (millis() - lastKeepalive > KEEPALIVE_INTERVAL) {
     sendKeepalive();
     lastKeepalive = millis();
   }
   
-  // Periodic status updates (less frequent than keepalive)
-  if (millis() - lastHeartbeat > HEARTBEAT_INTERVAL) {
-    printStatus();
-    lastHeartbeat = millis();
+  // Optional: Add sleep mode when no devices are connected
+  if (deviceCount == 0 && !uwbInitialized) {
+    delay(100);  // Additional delay when idle for power saving
   }
 } 
